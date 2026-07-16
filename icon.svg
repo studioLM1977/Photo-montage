@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="10%" y1="0%" x2="95%" y2="100%">
+      <stop offset="0%" stop-color="#8f7bff"/>
+      <stop offset="45%" stop-color="#9b6bf5"/>
+      <stop offset="100%" stop-color="#ff6f91"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="26%" cy="18%" r="75%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.38"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="vignette" cx="50%" cy="105%" r="75%">
+      <stop offset="0%" stop-color="#3a1050" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#3a1050" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="glassFill" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.34"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.10"/>
+    </linearGradient>
+    <linearGradient id="glassStroke" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.45"/>
+    </linearGradient>
+    <linearGradient id="triGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#f4f0ff"/>
+    </linearGradient>
+
+    <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#2a0a45" flood-opacity="0.35"/>
+    </filter>
+    <filter id="triShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#3a1050" flood-opacity="0.30"/>
+    </filter>
+    <filter id="cardShadow" x="-50%" y="-50%" width="200%" height="200%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#2a0a45" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <!-- fond -->
+  <rect width="512" height="512" fill="url(#bg)"/>
+  <rect width="512" height="512" fill="url(#vignette)"/>
+  <rect width="512" height="512" fill="url(#glow)"/>
+
+  <!-- pile de photos, légèrement éventée, avec ombre -->
+  <g filter="url(#cardShadow)">
+    <rect x="152" y="150" width="222" height="222" rx="38" fill="#ffffff" opacity="0.20" transform="rotate(-11 263 261)"/>
+    <rect x="152" y="150" width="222" height="222" rx="38" fill="#ffffff" opacity="0.30" transform="rotate(8 263 261)"/>
+  </g>
+
+  <!-- carte en verre dépoli au premier plan -->
+  <g filter="url(#softShadow)">
+    <rect x="138" y="138" width="236" height="236" rx="46" fill="url(#glassFill)" stroke="url(#glassStroke)" stroke-width="6"/>
+    <!-- reflet du haut -->
+    <path d="M158 160 Q256 132 354 160" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="10" stroke-linecap="round"/>
+  </g>
+
+  <!-- triangle de lecture -->
+  <path d="M228 200 Q222 200 222 208 L222 304 Q222 312 230 308 L318 260 Q325 256 318 252 L230 205 Q229 200 228 200 Z"
+        fill="url(#triGrad)" filter="url(#triShadow)"/>
+</svg>

@@ -1,8 +1,8 @@
-# Montage
+# DiapLIOrama
 
 Application de montage photo premium — transitions élégantes, fondus, durée d'affichage réglable, musique de fond et partage direct sur WhatsApp.
 
-Site **statique**, sans framework ni étape de build : 3 fichiers (`index.html`, `style.css`, `app.js`). Tout le traitement (rendu des transitions et génération de la vidéo) se fait **côté client**, dans le navigateur — aucune photo n'est envoyée à un serveur.
+Site **statique**, sans framework ni étape de build : 3 fichiers (`index.html`, `style.css`, `app.js`) + `manifest.json` et `icons/` pour l'icône et l'ajout à l'écran d'accueil. Tout le traitement (rendu des transitions et génération de la vidéo) se fait **côté client**, dans le navigateur — aucune photo n'est envoyée à un serveur.
 
 ## Fonctionnalités
 
@@ -47,6 +47,11 @@ Puis ouvrir `http://localhost:8000`. `MediaRecorder` et le partage de fichiers n
   `moof`+`mdat`) — chaque fragment est recollé dans un seul `mdat` final, avec recalcul des offsets
   par échantillon (sans quoi les données des fragments précédant le dernier étaient perdues,
   corrompant visiblement la fin des montages un peu longs). Validé par re-décodage pixel-perfect.
+- Le `ftyp` produit par `MediaRecorder` déclare des marques réservées au streaming fragmenté
+  (`iso5`/`hlsf`/`cmfc` — HLS/CMAF d'Apple), même une fois le fichier reconstruit en MP4 classique
+  par `flattenMp4()`. WhatsApp semble s'y fier pour refuser un envoi en document malgré un fichier
+  par ailleurs valide. Le `ftyp` est donc réécrit avec des marques génériques `isom`/`iso2`/`avc1`/
+  `mp41`, standard pour une vidéo "classique".
 - Les transitions restent légèrement plus compressées que les photos statiques (mesuré ~2-3 dB de
   PSNR en moins) : c'est une limite normale de l'encodage vidéo temps réel du navigateur (chaque
   image change beaucoup pendant un fondu, contre presque rien sur une photo fixe) — augmenter le
