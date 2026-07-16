@@ -97,6 +97,7 @@
   const whatsappHelpFilename = $('whatsappHelpFilename');
   const whatsappHelpOpen = $('whatsappHelpOpen');
   const whatsappHelpClose = $('whatsappHelpClose');
+  const whatsappHelpSkip = $('whatsappHelpSkip');
 
   const historyList = $('historyList');
   const themeToggle = $('themeToggle');
@@ -1320,12 +1321,25 @@ vec4 transition(vec2 p) {
   // WhatsApp recompresse presque toujours une vidéo reçue via le partage natif (navigator.share
   // vers WhatsApp directement). Le seul moyen fiable de garder la qualité d'origine est de
   // l'envoyer comme Document (bouton 📎 dans WhatsApp) — un choix que seul l'utilisateur peut
-  // faire à l'intérieur de l'app WhatsApp. On enregistre donc le fichier et on guide vers ce geste.
+  // faire à l'intérieur de l'app WhatsApp. On enregistre donc le fichier, on ouvre WhatsApp tout
+  // seul, et on n'affiche le rappel des étapes que si l'utilisateur ne l'a pas déjà masqué.
+  const SKIP_WHATSAPP_HELP_KEY = 'montage.skipWhatsappHelp';
+
+  whatsappHelpSkip.checked = localStorage.getItem(SKIP_WHATSAPP_HELP_KEY) === '1';
+  whatsappHelpSkip.addEventListener('change', () => {
+    localStorage.setItem(SKIP_WHATSAPP_HELP_KEY, whatsappHelpSkip.checked ? '1' : '0');
+  });
+
   shareWhatsappBtn.addEventListener('click', async () => {
     if (!currentExportUrl) return;
     await saveVideoLocally();
+    if (localStorage.getItem(SKIP_WHATSAPP_HELP_KEY) === '1') {
+      window.location.href = 'whatsapp://';
+      return;
+    }
     whatsappHelpFilename.textContent = suggestedFileName();
     whatsappHelp.classList.remove('hidden');
+    window.location.href = 'whatsapp://';
   });
 
   whatsappHelpOpen.addEventListener('click', () => {

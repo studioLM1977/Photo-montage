@@ -128,6 +128,7 @@ button { font-family: inherit; }
 }
 
 .brand { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 700; font-size: 1.15rem; }
+.brand-name-accent { color: var(--accent-2); }
 .brand-mark {
   display: inline-flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border-radius: var(--radius-full);
@@ -411,6 +412,12 @@ button { font-family: inherit; }
 .whatsapp-help-steps li { padding-left: 2px; }
 .whatsapp-help-actions { display: flex; gap: 10px; }
 .whatsapp-help-actions .btn { flex: 1; }
+
+.whatsapp-help-skip {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 16px;
+  font-size: 0.82rem; color: var(--text-dim); cursor: pointer; user-select: none;
+}
+.whatsapp-help-skip input { accent-color: var(--accent); width: 16px; height: 16px; }
 
 /* ===== Result zone ===== */
 .result-zone { margin-top: 24px; display: flex; justify-content: center; }
