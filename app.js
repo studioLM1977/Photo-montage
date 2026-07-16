@@ -93,6 +93,10 @@
   const downloadBtn = $('downloadBtn');
   const newMontageBtn = $('newMontageBtn');
   const resultConfetti = $('resultConfetti');
+  const whatsappHelp = $('whatsappHelp');
+  const whatsappHelpFilename = $('whatsappHelpFilename');
+  const whatsappHelpOpen = $('whatsappHelpOpen');
+  const whatsappHelpClose = $('whatsappHelpClose');
 
   const historyList = $('historyList');
   const themeToggle = $('themeToggle');
@@ -960,25 +964,24 @@ vec4 transition(vec2 p) {
     a.remove();
   });
 
-  shareWhatsappBtn.addEventListener('click', async () => {
-    if (!currentExportBlob) return;
-    const file = new File([currentExportBlob], suggestedFileName(), { type: currentExportBlob.type });
-    try {
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: 'Mon montage photo',
-          text: 'Regarde le montage que je viens de créer !',
-        });
-        return;
-      }
-    } catch (err) {
-      if (err && err.name === 'AbortError') return; // annulé par l'utilisateur
-    }
-    // Repli : téléchargement + ouverture de WhatsApp pour joindre le fichier manuellement
+  // WhatsApp recompresse presque toujours une vidéo reçue via le partage natif (navigator.share).
+  // Le seul moyen fiable de garder la qualité d'origine est de l'envoyer comme Document
+  // (bouton 📎 dans WhatsApp) — un choix que seul l'utilisateur peut faire à l'intérieur de
+  // l'app WhatsApp. On télécharge donc le fichier et on guide vers ce geste.
+  shareWhatsappBtn.addEventListener('click', () => {
+    if (!currentExportUrl) return;
     downloadBtn.click();
-    showToast('Vidéo téléchargée — ouvre WhatsApp et joins le fichier depuis tes téléchargements', 'info');
-    window.open(`https://wa.me/?text=${encodeURIComponent('Voici mon montage photo ! 🎞️')}`, '_blank', 'noopener');
+    whatsappHelpFilename.textContent = suggestedFileName();
+    whatsappHelp.classList.remove('hidden');
+  });
+
+  whatsappHelpOpen.addEventListener('click', () => {
+    whatsappHelp.classList.add('hidden');
+    window.location.href = 'whatsapp://';
+  });
+
+  whatsappHelpClose.addEventListener('click', () => {
+    whatsappHelp.classList.add('hidden');
   });
 
   newMontageBtn.addEventListener('click', () => {

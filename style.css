@@ -387,6 +387,31 @@ button { font-family: inherit; }
 .export-bar { margin-top: 16px; height: 4px; border-radius: var(--radius-full); background: var(--panel-border); overflow: hidden; }
 .export-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-2)); transition: width 0.2s var(--ease-soft); }
 
+/* ===== WhatsApp help panel ===== */
+.whatsapp-help {
+  position: fixed; inset: 0; z-index: 60;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(10px);
+  display: flex; align-items: center; justify-content: center;
+  padding: 20px;
+  animation: fadeIn 0.3s var(--ease-soft);
+}
+.whatsapp-help-card {
+  background: var(--bg-elevated); border: 1px solid var(--panel-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lift);
+  padding: 26px; max-width: 360px; width: 100%;
+  animation: resultIn 0.4s var(--ease-spring);
+}
+.whatsapp-help-card h3 { font-size: 1.1rem; margin-bottom: 10px; }
+.whatsapp-help-intro { font-size: 0.85rem; color: var(--text-dim); margin: 0 0 14px; }
+.whatsapp-help-steps {
+  margin: 0 0 20px; padding-left: 20px; font-size: 0.88rem; color: var(--text);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.whatsapp-help-steps li { padding-left: 2px; }
+.whatsapp-help-actions { display: flex; gap: 10px; }
+.whatsapp-help-actions .btn { flex: 1; }
+
 /* ===== Result zone ===== */
 .result-zone { margin-top: 24px; display: flex; justify-content: center; }
 .result-panel { padding: 28px; max-width: 420px; width: 100%; text-align: center; position: relative; overflow: hidden; }
