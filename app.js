@@ -821,6 +821,11 @@ vec4 transition(vec2 p) {
 
   function pickMimeType() {
     const candidates = [
+      // video/mp4 en premier : c'est le seul format que WhatsApp (iOS et Android)
+      // accepte de façon fiable pour un partage de vidéo. Safari sait l'enregistrer
+      // nativement ; les navigateurs qui ne le supportent pas retombent sur webm.
+      'video/mp4;codecs=avc1,mp4a.40.2',
+      'video/mp4',
       'video/webm;codecs=vp9,opus',
       'video/webm;codecs=vp8,opus',
       'video/webm',
@@ -929,7 +934,9 @@ vec4 transition(vec2 p) {
   /* ===================== Share / download ===================== */
 
   function suggestedFileName() {
-    return `montage-${new Date().toISOString().slice(0, 10)}.webm`;
+    const type = (currentExportBlob && currentExportBlob.type) || '';
+    const ext = type.includes('mp4') ? 'mp4' : 'webm';
+    return `montage-${new Date().toISOString().slice(0, 10)}.${ext}`;
   }
 
   downloadBtn.addEventListener('click', () => {
