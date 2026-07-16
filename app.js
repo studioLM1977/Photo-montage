@@ -29,6 +29,11 @@
     hd:       { w: 720, h: 1280, bitrate: 6_000_000 },
   };
 
+  // Les photos de téléphone (12+ Mpx) gardées en pleine résolution en mémoire pendant
+  // toute la session peuvent saturer un mobile et faire échouer le rendu silencieusement.
+  // On les redimensionne une fois à l'import : largement suffisant pour un export HD (720x1280).
+  const MAX_PHOTO_DIMENSION = 1920;
+
   const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   let nextId = 1;
@@ -175,18 +180,50 @@
     if (files.length) addPhotos(files);
   });
 
+  function loadImage(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = () => reject(new Error('image load failed'));
+      img.src = url;
+    });
+  }
+
+  // Redimensionne l'image chargée si elle dépasse MAX_PHOTO_DIMENSION, pour éviter de
+  // garder plusieurs photos pleine résolution (12+ Mpx) en mémoire pendant toute la session.
+  function normalizePhotoImage(img) {
+    const { naturalWidth: w, naturalHeight: h } = img;
+    if (w <= MAX_PHOTO_DIMENSION && h <= MAX_PHOTO_DIMENSION) return img;
+    const scale = MAX_PHOTO_DIMENSION / Math.max(w, h);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(w * scale);
+    canvas.height = Math.round(h * scale);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas;
+  }
+
+  function mediaSize(media) {
+    return { w: media.naturalWidth || media.width, h: media.naturalHeight || media.height };
+  }
+
   async function addPhotos(files) {
     if (!files.length) return;
-    const additions = files.map((file) => {
-      const url = URL.createObjectURL(file);
-      const img = new Image();
-      img.src = url;
-      return { id: nextId++, file, url, img, durationOverride: null };
-    });
-    state.photos.push(...additions);
-    await Promise.all(
-      additions.map((p) => p.img.decode().catch(() => {}))
+    const loaded = await Promise.all(
+      files.map(async (file) => {
+        const url = URL.createObjectURL(file);
+        try {
+          const rawImg = await loadImage(url);
+          const img = normalizePhotoImage(rawImg);
+          return { id: nextId++, file, url, img, durationOverride: null };
+        } catch (err) {
+          showToast(`Impossible de charger "${file.name}"`, 'info');
+          URL.revokeObjectURL(url);
+          return null;
+        }
+      })
     );
+    const additions = loaded.filter(Boolean);
+    state.photos.push(...additions);
     importZone.classList.add('hidden');
     editZone.classList.remove('hidden');
     renderGrid();
@@ -608,10 +645,12 @@ vec4 transition(vec2 p) {
   /* ===================== Canvas drawing ===================== */
 
   function drawCover(ctx, img, cx, cy, cw, ch, zoom = 1, panX = 0, panY = 0) {
-    if (!img || !img.naturalWidth) return;
-    const scale = Math.max(cw / img.naturalWidth, ch / img.naturalHeight) * zoom;
-    const dw = img.naturalWidth * scale;
-    const dh = img.naturalHeight * scale;
+    if (!img) return;
+    const { w: iw, h: ih } = mediaSize(img);
+    if (!iw || !ih) return;
+    const scale = Math.max(cw / iw, ch / ih) * zoom;
+    const dw = iw * scale;
+    const dh = ih * scale;
     const dx = cx + (cw - dw) / 2 + panX * cw;
     const dy = cy + (ch - dh) / 2 + panY * ch;
     ctx.drawImage(img, dx, dy, dw, dh);
@@ -759,7 +798,11 @@ vec4 transition(vec2 p) {
         previewTime.textContent = formatTime(0);
         return;
       }
-      renderPreviewFrame(t);
+      try {
+        renderPreviewFrame(t);
+      } catch (err) {
+        console.error('Erreur de rendu de l\'aperçu :', err);
+      }
       previewProgressBar.style.width = `${(t / total) * 100}%`;
       previewTime.textContent = formatTime(t);
       playRaf = requestAnimationFrame(loop);
@@ -840,13 +883,16 @@ vec4 transition(vec2 p) {
     await new Promise((resolve) => {
       function frame(now) {
         const t = (now - startTs) / 1000;
+        try {
+          renderAt(exportCtx, w, h, Math.min(t, total - 0.001));
+        } catch (err) {
+          console.error('Erreur de rendu export :', err);
+        }
         if (t >= total) {
-          renderAt(exportCtx, w, h, total - 0.001);
           exportBar.style.width = '100%';
           resolve();
           return;
         }
-        renderAt(exportCtx, w, h, t);
         exportBar.style.width = `${(t / total) * 100}%`;
         requestAnimationFrame(frame);
       }

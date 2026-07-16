@@ -282,13 +282,10 @@ button { font-family: inherit; }
 .photo-card-move {
   position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);
   display: flex; justify-content: space-between; padding: 0 4px;
-  opacity: 0; transition: opacity 0.2s;
-  pointer-events: none;
 }
-.photo-card:hover .photo-card-move, .photo-card:focus-within .photo-card-move { opacity: 1; pointer-events: auto; }
 .move-btn {
-  width: 26px; height: 26px; border-radius: 50%; border: none; cursor: pointer;
-  background: rgba(0, 0, 0, 0.55); color: white; font-size: 0.9rem; font-weight: 700;
+  width: 30px; height: 30px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(0, 0, 0, 0.5); color: white; font-size: 1rem; font-weight: 700;
   display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
   transition: background 0.2s, transform 0.15s var(--ease-spring);
 }
@@ -346,6 +343,12 @@ button { font-family: inherit; }
 .field-row { display: flex; flex-direction: column; }
 .music-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .music-name { font-size: 0.82rem; color: var(--text-faint); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.music-library-link {
+  display: inline-block; margin-top: 8px; font-size: 0.8rem; font-weight: 600;
+  color: var(--accent); text-decoration: none;
+}
+.music-library-link:hover { text-decoration: underline; }
 
 /* ===== Preview ===== */
 .preview-stage {
