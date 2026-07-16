@@ -1050,23 +1050,41 @@ vec4 transition(vec2 p) {
     return `montage-${new Date().toISOString().slice(0, 10)}.${ext}`;
   }
 
-  downloadBtn.addEventListener('click', () => {
-    if (!currentExportUrl) return;
+  // Le lien <a download> sur un blob vidéo est notoirement lent/peu fiable sur Safari iOS
+  // (pas de vraie fenêtre de téléchargement natif). navigator.share, quand disponible,
+  // ouvre le partage natif iOS ("Enregistrer dans Fichiers"/"Enregistrer la vidéo"), bien
+  // plus rapide — on l'utilise en priorité, avec repli sur le lien classique sinon.
+  async function saveVideoLocally() {
+    if (!currentExportBlob || !currentExportUrl) return false;
+    const file = new File([currentExportBlob], suggestedFileName(), { type: currentExportBlob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({ files: [file] });
+        return true;
+      } catch (err) {
+        if (err && err.name === 'AbortError') return false; // annulé par l'utilisateur
+      }
+    }
     const a = document.createElement('a');
     a.href = currentExportUrl;
     a.download = suggestedFileName();
     document.body.appendChild(a);
     a.click();
     a.remove();
+    return true;
+  }
+
+  downloadBtn.addEventListener('click', () => {
+    saveVideoLocally();
   });
 
-  // WhatsApp recompresse presque toujours une vidéo reçue via le partage natif (navigator.share).
-  // Le seul moyen fiable de garder la qualité d'origine est de l'envoyer comme Document
-  // (bouton 📎 dans WhatsApp) — un choix que seul l'utilisateur peut faire à l'intérieur de
-  // l'app WhatsApp. On télécharge donc le fichier et on guide vers ce geste.
-  shareWhatsappBtn.addEventListener('click', () => {
+  // WhatsApp recompresse presque toujours une vidéo reçue via le partage natif (navigator.share
+  // vers WhatsApp directement). Le seul moyen fiable de garder la qualité d'origine est de
+  // l'envoyer comme Document (bouton 📎 dans WhatsApp) — un choix que seul l'utilisateur peut
+  // faire à l'intérieur de l'app WhatsApp. On enregistre donc le fichier et on guide vers ce geste.
+  shareWhatsappBtn.addEventListener('click', async () => {
     if (!currentExportUrl) return;
-    downloadBtn.click();
+    await saveVideoLocally();
     whatsappHelpFilename.textContent = suggestedFileName();
     whatsappHelp.classList.remove('hidden');
   });
