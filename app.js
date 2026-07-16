@@ -1123,7 +1123,17 @@ vec4 transition(vec2 p) {
 
     const moovBox = mp4Box('moov', concatBytes([patchedMvhd, ...trakBoxes.map((t) => t.bytes)]));
     const mdatBox = mp4Box('mdat', mdatPayload);
-    const ftypBytes = buf.slice(ftyp.pos, ftyp.pos + ftyp.size);
+    // Le ftyp d'origine (copié par MediaRecorder) déclare des marques réservées au streaming
+    // fragmenté (iso5/hlsf/cmfc — HLS/CMAF) même une fois le fichier reconstruit en MP4
+    // classique : certains validateurs (dont WhatsApp) semblent s'y fier pour refuser le
+    // fichier. On le remplace par un ftyp générique de MP4 "classique" façon caméra.
+    const ftypBrands = ['isom', 'iso2', 'avc1', 'mp41'];
+    const ftypPayload = new Uint8Array(8 + ftypBrands.length * 4);
+    ftypPayload.set([0x69, 0x73, 0x6f, 0x6d]); // major_brand = 'isom'
+    ftypBrands.forEach((brand, i) => {
+      for (let c = 0; c < 4; c++) ftypPayload[8 + i * 4 + c] = brand.charCodeAt(c);
+    });
+    const ftypBytes = mp4Box('ftyp', ftypPayload);
     const headerTotalLen = ftypBytes.length + moovBox.length + 8;
 
     // Deuxième passe : patcher les stco de chaque piste avec les vrais offsets absolus.
