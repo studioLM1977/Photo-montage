@@ -42,5 +42,12 @@ Puis ouvrir `http://localhost:8000`. `MediaRecorder` et le partage de fichiers n
   d'échantillons, durée à 0) — une structure valide en soi, mais que WhatsApp semble refuser pour
   un envoi de document (il attend une vidéo "classique" façon caméra). `flattenMp4()` dans `app.js`
   reconstruit une table d'échantillons classique (`stts`/`stsc`/`stsz`/`stco`/`stss`) à partir des
-  boîtes `moof`/`traf`/`trun`, sans toucher aux octets image, sans dépendance externe. Validé par
-  re-décodage pixel-perfect (comparaison frame par frame avec l'original).
+  boîtes `moof`/`traf`/`trun`, sans toucher aux octets image, sans dépendance externe. Gère aussi
+  le cas où `MediaRecorder` découpe un enregistrement en **plusieurs fragments** (plusieurs paires
+  `moof`+`mdat`) — chaque fragment est recollé dans un seul `mdat` final, avec recalcul des offsets
+  par échantillon (sans quoi les données des fragments précédant le dernier étaient perdues,
+  corrompant visiblement la fin des montages un peu longs). Validé par re-décodage pixel-perfect.
+- Les transitions restent légèrement plus compressées que les photos statiques (mesuré ~2-3 dB de
+  PSNR en moins) : c'est une limite normale de l'encodage vidéo temps réel du navigateur (chaque
+  image change beaucoup pendant un fondu, contre presque rien sur une photo fixe) — augmenter le
+  bitrate n'apporte qu'un gain marginal (testé), pas un vrai correctif.

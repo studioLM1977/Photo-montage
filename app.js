@@ -972,21 +972,42 @@ vec4 transition(vec2 p) {
     const moofList = mp4FindAllBoxes(view, buf, 0, buf.length, 'moof');
     if (!moofList.length) return blob; // déjà un MP4 classique (pas fragmenté)
 
+    // MediaRecorder peut découper un enregistrement un peu long en PLUSIEURS fragments
+    // (plusieurs paires moof+mdat), pas une seule — chaque fragment a son propre mdat.
+    // On les retrouve tous et on les recolle en un seul mdat final, en recalculant pour
+    // chaque échantillon sa position dans ce mdat combiné (sans quoi les données des
+    // fragments précédant le dernier sont silencieusement perdues).
+    const fragments = [];
     const trafByTrack = new Map();
     for (const moof of moofList) {
+      const mdat = mp4FindBox(view, buf, moof.pos + moof.size, buf.length, 'mdat');
+      if (!mdat) return blob;
+      const mdatPayloadStart = mdat.pos + 8;
+      const fragIndex = fragments.length;
+      fragments.push({ mdatPayloadStart, mdatPayload: buf.subarray(mdatPayloadStart, mdat.pos + mdat.size) });
+
       const trafs = mp4FindAllBoxes(view, buf, moof.pos + 8, moof.pos + moof.size, 'traf');
       for (const traf of trafs) {
         const { trackId, samples } = parseTrafSamples(view, buf, traf.pos, traf.size, moof.pos);
+        samples.forEach((s) => { s.frag = fragIndex; });
         if (!trafByTrack.has(trackId)) trafByTrack.set(trackId, []);
         trafByTrack.get(trackId).push(...samples);
       }
     }
 
-    const lastMoof = moofList[moofList.length - 1];
-    const mdat = mp4FindBox(view, buf, lastMoof.pos + lastMoof.size, buf.length, 'mdat');
-    if (!mdat) return blob;
-    const mdatPayloadStart = mdat.pos + 8;
-    const mdatPayload = buf.subarray(mdatPayloadStart, mdat.pos + mdat.size);
+    const fragNewBase = [];
+    let combinedSize = 0;
+    for (const f of fragments) {
+      fragNewBase.push(combinedSize);
+      combinedSize += f.mdatPayload.length;
+    }
+    const mdatPayload = new Uint8Array(combinedSize);
+    fragments.forEach((f, i) => mdatPayload.set(f.mdatPayload, fragNewBase[i]));
+
+    function newOffsetForSample(s) {
+      const frag = fragments[s.frag];
+      return fragNewBase[s.frag] + (s.absOffset - frag.mdatPayloadStart);
+    }
 
     const mvhd = mp4FindBox(view, buf, moov.pos + 8, moov.pos + moov.size, 'mvhd');
     const mvhdVersion = buf[mvhd.pos + 8];
@@ -1118,7 +1139,7 @@ vec4 transition(vec2 p) {
       }
       const entriesStart = markerPos + 4 + 4 + 4 + 4; // size+type+version_flags+entry_count
       samples.forEach((s, i) => {
-        const newOffset = headerTotalLen + (s.absOffset - mdatPayloadStart);
+        const newOffset = headerTotalLen + newOffsetForSample(s);
         trakView.setUint32(entriesStart + i * 4, newOffset);
       });
       return trakBytes;
