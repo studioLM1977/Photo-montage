@@ -25,14 +25,15 @@
   };
 
   const QUALITY_SIZES = {
-    standard: { w: 540, h: 960, bitrate: 2_500_000 },
-    hd:       { w: 720, h: 1280, bitrate: 6_000_000 },
+    standard: { w: 720, h: 1280, bitrate: 5_000_000 },
+    hd:       { w: 1080, h: 1920, bitrate: 12_000_000 },
   };
 
   // Les photos de téléphone (12+ Mpx) gardées en pleine résolution en mémoire pendant
   // toute la session peuvent saturer un mobile et faire échouer le rendu silencieusement.
-  // On les redimensionne une fois à l'import : largement suffisant pour un export HD (720x1280).
-  const MAX_PHOTO_DIMENSION = 1920;
+  // On les redimensionne une fois à l'import : garde de la marge au-dessus de l'export
+  // HD (1080x1920) pour rester net même avec le zoom Ken Burns.
+  const MAX_PHOTO_DIMENSION = 2200;
 
   const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
@@ -66,8 +67,15 @@
   const watermarkInput = $('watermarkInput');
   const qualitySelect = $('qualitySelect');
 
+  function ctx2d(canvas) {
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    return ctx;
+  }
+
   const previewCanvas = $('previewCanvas');
-  const previewCtx = previewCanvas.getContext('2d');
+  const previewCtx = ctx2d(previewCanvas);
   const previewEmpty = $('previewEmpty');
   const previewProgressBar = $('previewProgressBar');
   const playBtn = $('playBtn');
@@ -198,7 +206,7 @@
     const canvas = document.createElement('canvas');
     canvas.width = Math.round(w * scale);
     canvas.height = Math.round(h * scale);
-    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx2d(canvas).drawImage(img, 0, 0, canvas.width, canvas.height);
     return canvas;
   }
 
@@ -410,6 +418,9 @@
     const { w, h } = QUALITY_SIZES[state.quality];
     previewCanvas.width = w;
     previewCanvas.height = h;
+    // Changer width/height réinitialise l'état du contexte (dont imageSmoothingQuality).
+    previewCtx.imageSmoothingEnabled = true;
+    previewCtx.imageSmoothingQuality = 'high';
   }
   resizeCanvasForQuality();
 
@@ -637,7 +648,7 @@ vec4 transition(vec2 p) {
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
-    drawCover(c.getContext('2d'), photo.img, 0, 0, w, h);
+    drawCover(ctx2d(c), photo.img, 0, 0, w, h);
     photo._cover = { key, canvas: c };
     return c;
   }
@@ -848,7 +859,7 @@ vec4 transition(vec2 p) {
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = w;
     exportCanvas.height = h;
-    const exportCtx = exportCanvas.getContext('2d');
+    const exportCtx = ctx2d(exportCanvas);
 
     const total = totalDuration();
     const videoStream = exportCanvas.captureStream(30);
