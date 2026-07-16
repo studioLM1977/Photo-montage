@@ -832,6 +832,95 @@ vec4 transition(vec2 p) {
     if (state.music) state.music.el.pause();
   }
 
+  /* ===================== Correction durée MP4 ===================== */
+  // MediaRecorder produit un MP4 fragmenté dont l'en-tête (mvhd/tkhd/mdhd) déclare une
+  // durée de 0 et ne contient pas de boîte mehd (fragment_duration) — un point que
+  // certains validateurs stricts (dont WhatsApp) semblent utiliser pour refuser le fichier.
+  // On patche ces champs avec la vraie durée, calculée côté app, sans dépendance externe.
+  async function patchMp4Duration(blob, durationSeconds) {
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const view = new DataView(buf.buffer);
+
+    function findBox(start, end, type) {
+      let pos = start;
+      while (pos + 8 <= end) {
+        const size = view.getUint32(pos);
+        const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
+        if (t === type) return { pos, size };
+        if (size <= 0) break;
+        pos += size;
+      }
+      return null;
+    }
+
+    const moov = findBox(0, buf.length, 'moov');
+    if (!moov) return blob;
+
+    const mvhd = findBox(moov.pos + 8, moov.pos + moov.size, 'mvhd');
+    if (!mvhd) return blob;
+    const mvhdVersion = buf[mvhd.pos + 8];
+    // header(8) + version/flags(4) + (v1: ctime8+mtime8=16 | v0: ctime4+mtime4=8) -> timescale ; +4 -> duration
+    const movieTsOff = mvhd.pos + 8 + 4 + (mvhdVersion === 1 ? 16 : 8);
+    const movieDurOff = movieTsOff + 4;
+    const movieTimescale = view.getUint32(movieTsOff);
+    const movieTicks = Math.round(durationSeconds * movieTimescale);
+    view.setUint32(movieDurOff, movieTicks);
+
+    let pos = moov.pos + 8;
+    while (pos + 8 <= moov.pos + moov.size) {
+      const size = view.getUint32(pos);
+      const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
+      if (t === 'trak') {
+        const tkhd = findBox(pos + 8, pos + size, 'tkhd');
+        if (tkhd) {
+          const v = buf[tkhd.pos + 8];
+          // header(8) + version/flags(4) + (v1: ctime8+mtime8+trackID4+reserved4=24 | v0: 4+4+4+4=16)
+          const durOff = tkhd.pos + 8 + 4 + (v === 1 ? 24 : 16);
+          view.setUint32(durOff, movieTicks);
+        }
+        const mdia = findBox(pos + 8, pos + size, 'mdia');
+        if (mdia) {
+          const mdhd = findBox(mdia.pos + 8, mdia.pos + mdia.size, 'mdhd');
+          if (mdhd) {
+            const v = buf[mdhd.pos + 8];
+            const tsOff = mdhd.pos + 8 + 4 + (v === 1 ? 16 : 8);
+            const trackTimescale = view.getUint32(tsOff);
+            view.setUint32(tsOff + 4, Math.round(durationSeconds * trackTimescale));
+          }
+        }
+      }
+      if (size <= 0) break;
+      pos += size;
+    }
+
+    const mvex = findBox(moov.pos + 8, moov.pos + moov.size, 'mvex');
+    if (mvex) {
+      const existingMehd = findBox(mvex.pos + 8, mvex.pos + mvex.size, 'mehd');
+      if (!existingMehd) {
+        const mehd = new Uint8Array(16);
+        const mehdView = new DataView(mehd.buffer);
+        mehdView.setUint32(0, 16);
+        mehd.set([0x6d, 0x65, 0x68, 0x64], 4); // 'mehd'
+        mehdView.setUint32(8, 0); // version + flags
+        mehdView.setUint32(12, movieTicks);
+
+        const insertAt = mvex.pos + 8;
+        const patched = new Uint8Array(buf.length + 16);
+        patched.set(buf.subarray(0, insertAt), 0);
+        patched.set(mehd, insertAt);
+        patched.set(buf.subarray(insertAt), insertAt + 16);
+
+        const patchedView = new DataView(patched.buffer);
+        patchedView.setUint32(mvex.pos, mvex.size + 16);
+        patchedView.setUint32(moov.pos, moov.size + 16);
+
+        return new Blob([patched], { type: blob.type });
+      }
+    }
+
+    return new Blob([buf], { type: blob.type });
+  }
+
   /* ===================== Export ===================== */
 
   function pickMimeType() {
@@ -923,7 +1012,14 @@ vec4 transition(vec2 p) {
     if (musicEl) musicEl.pause();
     exportStatus.textContent = 'Finalisation…';
 
-    const blob = await finished;
+    let blob = await finished;
+    if (blob.type.includes('mp4')) {
+      try {
+        blob = await patchMp4Duration(blob, total);
+      } catch (err) {
+        console.error('Impossible de corriger la durée du MP4, envoi du fichier tel quel :', err);
+      }
+    }
     currentExportBlob = blob;
     currentExportUrl = URL.createObjectURL(blob);
 

@@ -14,7 +14,7 @@ Site **statique**, sans framework ni étape de build : 3 fichiers (`index.html`,
 - Filigrane texte optionnel.
 - Templates de style prêts à l'emploi (Romantique, Voyage, Fête, Minimaliste) ou réglages personnalisés.
 - Aperçu en temps réel avant export.
-- Export vidéo (WebM, via `MediaRecorder` + `canvas.captureStream`), qualité Standard ou Haute définition.
+- Export vidéo (MP4 si le navigateur le supporte, WebM sinon, via `MediaRecorder` + `canvas.captureStream`), qualité Standard ou Haute définition.
 - Partage direct vers WhatsApp (`navigator.share`), avec repli téléchargement + ouverture de WhatsApp si l'appareil ne supporte pas le partage de fichier.
 - Historique des montages générés dans la session en cours.
 - Thème sombre/clair, respect de `prefers-reduced-motion`.
@@ -36,5 +36,6 @@ Puis ouvrir `http://localhost:8000`. `MediaRecorder` et le partage de fichiers n
   dans `vendor/gl-transitions/` et intégrés à `app.js` via un petit moteur WebGL (aucune dépendance
   de build). Repli automatique sur un fondu croisé si WebGL n'est pas disponible.
 - L'export vidéo se déroule en temps réel (la génération dure aussi longtemps que la vidéo finale) car elle repose sur la capture du flux du canvas — c'est la contrepartie du traitement 100 % côté client, sans dépendance lourde type `ffmpeg.wasm`.
-- Format de sortie : WebM (VP9/VP8 + Opus selon le support du navigateur). Compatible avec le partage WhatsApp sur mobile.
+- Format de sortie : MP4 (H.264/AAC) en priorité — c'est le seul format que WhatsApp accepte de façon fiable pour un partage vidéo. Repli sur WebM (VP9/VP8 + Opus) si le navigateur ne sait pas encoder de MP4 côté client.
 - Aucune dépendance externe, aucun `package.json` : à héberger tel quel sur n'importe quel hébergeur statique.
+- `MediaRecorder` produit un MP4 fragmenté dont l'en-tête déclare une durée de 0 (`mvhd`/`mdhd`) et ne contient pas de boîte `mehd` — un point que certains services (dont WhatsApp) semblent utiliser pour refuser le fichier. `patchMp4Duration()` dans `app.js` corrige ces champs après l'enregistrement, sans dépendance externe.
