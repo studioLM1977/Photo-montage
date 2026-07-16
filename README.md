@@ -38,4 +38,9 @@ Puis ouvrir `http://localhost:8000`. `MediaRecorder` et le partage de fichiers n
 - L'export vidéo se déroule en temps réel (la génération dure aussi longtemps que la vidéo finale) car elle repose sur la capture du flux du canvas — c'est la contrepartie du traitement 100 % côté client, sans dépendance lourde type `ffmpeg.wasm`.
 - Format de sortie : MP4 (H.264/AAC) en priorité — c'est le seul format que WhatsApp accepte de façon fiable pour un partage vidéo. Repli sur WebM (VP9/VP8 + Opus) si le navigateur ne sait pas encoder de MP4 côté client.
 - Aucune dépendance externe, aucun `package.json` : à héberger tel quel sur n'importe quel hébergeur statique.
-- `MediaRecorder` produit un MP4 fragmenté dont l'en-tête déclare une durée de 0 (`mvhd`/`mdhd`) et ne contient pas de boîte `mehd` — un point que certains services (dont WhatsApp) semblent utiliser pour refuser le fichier. `patchMp4Duration()` dans `app.js` corrige ces champs après l'enregistrement, sans dépendance externe.
+- `MediaRecorder` produit un MP4 **fragmenté** (`moov` + `moof` + `mdat`, sans vraies tables
+  d'échantillons, durée à 0) — une structure valide en soi, mais que WhatsApp semble refuser pour
+  un envoi de document (il attend une vidéo "classique" façon caméra). `flattenMp4()` dans `app.js`
+  reconstruit une table d'échantillons classique (`stts`/`stsc`/`stsz`/`stco`/`stss`) à partir des
+  boîtes `moof`/`traf`/`trun`, sans toucher aux octets image, sans dépendance externe. Validé par
+  re-décodage pixel-perfect (comparaison frame par frame avec l'original).

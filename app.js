@@ -832,93 +832,301 @@ vec4 transition(vec2 p) {
     if (state.music) state.music.el.pause();
   }
 
-  /* ===================== Correction durée MP4 ===================== */
-  // MediaRecorder produit un MP4 fragmenté dont l'en-tête (mvhd/tkhd/mdhd) déclare une
-  // durée de 0 et ne contient pas de boîte mehd (fragment_duration) — un point que
-  // certains validateurs stricts (dont WhatsApp) semblent utiliser pour refuser le fichier.
-  // On patche ces champs avec la vraie durée, calculée côté app, sans dépendance externe.
-  async function patchMp4Duration(blob, durationSeconds) {
-    const buf = new Uint8Array(await blob.arrayBuffer());
-    const view = new DataView(buf.buffer);
-
-    function findBox(start, end, type) {
-      let pos = start;
-      while (pos + 8 <= end) {
-        const size = view.getUint32(pos);
-        const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
-        if (t === type) return { pos, size };
-        if (size <= 0) break;
-        pos += size;
-      }
-      return null;
-    }
-
-    const moov = findBox(0, buf.length, 'moov');
-    if (!moov) return blob;
-
-    const mvhd = findBox(moov.pos + 8, moov.pos + moov.size, 'mvhd');
-    if (!mvhd) return blob;
-    const mvhdVersion = buf[mvhd.pos + 8];
-    // header(8) + version/flags(4) + (v1: ctime8+mtime8=16 | v0: ctime4+mtime4=8) -> timescale ; +4 -> duration
-    const movieTsOff = mvhd.pos + 8 + 4 + (mvhdVersion === 1 ? 16 : 8);
-    const movieDurOff = movieTsOff + 4;
-    const movieTimescale = view.getUint32(movieTsOff);
-    const movieTicks = Math.round(durationSeconds * movieTimescale);
-    view.setUint32(movieDurOff, movieTicks);
-
-    let pos = moov.pos + 8;
-    while (pos + 8 <= moov.pos + moov.size) {
+  /* ===================== Défragmentation MP4 ===================== */
+  // MediaRecorder produit un MP4 "fragmenté" (moov + moof + mdat, sans vraies tables
+  // d'échantillons, durée à 0) — une structure valide selon la norme ISO-BMFF, que la
+  // plupart des lecteurs savent lire, mais qui semble hors du périmètre que WhatsApp
+  // accepte pour un envoi de document (probablement calibré sur des vidéos "classiques"
+  // façon caméra). On reconstruit ici une table d'échantillons classique (stts/stsc/stsz/
+  // stco/stss) à partir des boîtes moof/traf/trun, sans toucher aux octets image (mdat
+  // recopié tel quel) — validé par re-décodage pixel-perfect avant intégration.
+  function mp4FindBox(view, buf, start, end, type) {
+    let pos = start;
+    while (pos + 8 <= end) {
       const size = view.getUint32(pos);
       const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
-      if (t === 'trak') {
-        const tkhd = findBox(pos + 8, pos + size, 'tkhd');
-        if (tkhd) {
-          const v = buf[tkhd.pos + 8];
-          // header(8) + version/flags(4) + (v1: ctime8+mtime8+trackID4+reserved4=24 | v0: 4+4+4+4=16)
-          const durOff = tkhd.pos + 8 + 4 + (v === 1 ? 24 : 16);
-          view.setUint32(durOff, movieTicks);
-        }
-        const mdia = findBox(pos + 8, pos + size, 'mdia');
-        if (mdia) {
-          const mdhd = findBox(mdia.pos + 8, mdia.pos + mdia.size, 'mdhd');
-          if (mdhd) {
-            const v = buf[mdhd.pos + 8];
-            const tsOff = mdhd.pos + 8 + 4 + (v === 1 ? 16 : 8);
-            const trackTimescale = view.getUint32(tsOff);
-            view.setUint32(tsOff + 4, Math.round(durationSeconds * trackTimescale));
-          }
+      if (t === type) return { pos, size };
+      if (size <= 0) break;
+      pos += size;
+    }
+    return null;
+  }
+
+  function mp4FindAllBoxes(view, buf, start, end, type) {
+    const out = [];
+    let pos = start;
+    while (pos + 8 <= end) {
+      const size = view.getUint32(pos);
+      const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
+      if (t === type) out.push({ pos, size });
+      if (size <= 0) break;
+      pos += size;
+    }
+    return out;
+  }
+
+  function mp4Box(typeStr, payload) {
+    const out = new Uint8Array(8 + payload.length);
+    const v = new DataView(out.buffer);
+    v.setUint32(0, out.length);
+    for (let i = 0; i < 4; i++) out[4 + i] = typeStr.charCodeAt(i);
+    out.set(payload, 8);
+    return out;
+  }
+
+  // mvhd/tkhd/mdhd version 1 utilisent des champs 64 bits pour creation_time/modification_time/
+  // duration (et non 32 bits comme en version 0) — nos durées tiennent largement dans 32 bits,
+  // on écrit donc 0 sur les 4 octets de poids fort et la vraie valeur sur les 4 de poids faible.
+  function writeDurationField(view, off, version, value) {
+    if (version === 1) {
+      view.setUint32(off, 0);
+      view.setUint32(off + 4, value);
+    } else {
+      view.setUint32(off, value);
+    }
+  }
+
+  function concatBytes(chunks) {
+    const total = chunks.reduce((s, c) => s + c.length, 0);
+    const out = new Uint8Array(total);
+    let off = 0;
+    for (const c of chunks) {
+      out.set(c, off);
+      off += c.length;
+    }
+    return out;
+  }
+
+  function parseTrafSamples(view, buf, trafPos, trafSize, moofPos) {
+    const tfhd = mp4FindBox(view, buf, trafPos + 8, trafPos + trafSize, 'tfhd');
+    const tfhdFlags = view.getUint32(tfhd.pos + 8) & 0xffffff;
+    const trackId = view.getUint32(tfhd.pos + 12);
+    let q = tfhd.pos + 16;
+    let defaultSampleDuration = 0;
+    let defaultSampleSize = 0;
+    let defaultSampleFlags = 0;
+    let baseDataOffset = null;
+    if (tfhdFlags & 0x000001) {
+      // 64-bit base_data_offset
+      baseDataOffset = view.getUint32(q) * 2 ** 32 + view.getUint32(q + 4);
+      q += 8;
+    }
+    if (tfhdFlags & 0x000002) q += 4;
+    if (tfhdFlags & 0x000008) { defaultSampleDuration = view.getUint32(q); q += 4; }
+    if (tfhdFlags & 0x000010) { defaultSampleSize = view.getUint32(q); q += 4; }
+    if (tfhdFlags & 0x000020) { defaultSampleFlags = view.getUint32(q); q += 4; }
+    const defaultBaseIsMoof = !!(tfhdFlags & 0x020000);
+
+    const samples = [];
+    let pos = trafPos + 8;
+    while (pos + 8 <= trafPos + trafSize) {
+      const size = view.getUint32(pos);
+      const t = String.fromCharCode(buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]);
+      if (t === 'trun') {
+        const flags = view.getUint32(pos + 8) & 0xffffff;
+        const sampleCount = view.getUint32(pos + 12);
+        let qq = pos + 16;
+        let dataOffset = 0;
+        if (flags & 0x000001) { dataOffset = view.getInt32(qq); qq += 4; }
+        let firstSampleFlags = null;
+        if (flags & 0x000004) { firstSampleFlags = view.getUint32(qq); qq += 4; }
+        const hasDur = !!(flags & 0x000100);
+        const hasSize = !!(flags & 0x000200);
+        const hasFlags = !!(flags & 0x000400);
+        const hasCto = !!(flags & 0x000800);
+
+        let runBase;
+        if (defaultBaseIsMoof) runBase = moofPos + dataOffset;
+        else if (baseDataOffset !== null) runBase = baseDataOffset + dataOffset;
+        else runBase = moofPos + dataOffset;
+
+        let cursor = runBase;
+        for (let i = 0; i < sampleCount; i++) {
+          let dur = defaultSampleDuration;
+          if (hasDur) { dur = view.getUint32(qq); qq += 4; }
+          let sz = defaultSampleSize;
+          if (hasSize) { sz = view.getUint32(qq); qq += 4; }
+          let flg = defaultSampleFlags;
+          if (hasFlags) { flg = view.getUint32(qq); qq += 4; }
+          else if (i === 0 && firstSampleFlags !== null) flg = firstSampleFlags;
+          if (hasCto) qq += 4;
+          const isSync = ((flg >>> 16) & 0x1) === 0;
+          samples.push({ duration: dur, size: sz, sync: isSync, absOffset: cursor });
+          cursor += sz;
         }
       }
       if (size <= 0) break;
       pos += size;
     }
+    return { trackId, samples };
+  }
 
-    const mvex = findBox(moov.pos + 8, moov.pos + moov.size, 'mvex');
-    if (mvex) {
-      const existingMehd = findBox(mvex.pos + 8, mvex.pos + mvex.size, 'mehd');
-      if (!existingMehd) {
-        const mehd = new Uint8Array(16);
-        const mehdView = new DataView(mehd.buffer);
-        mehdView.setUint32(0, 16);
-        mehd.set([0x6d, 0x65, 0x68, 0x64], 4); // 'mehd'
-        mehdView.setUint32(8, 0); // version + flags
-        mehdView.setUint32(12, movieTicks);
+  async function flattenMp4(blob, durationSeconds) {
+    const buf = new Uint8Array(await blob.arrayBuffer());
+    const view = new DataView(buf.buffer);
 
-        const insertAt = mvex.pos + 8;
-        const patched = new Uint8Array(buf.length + 16);
-        patched.set(buf.subarray(0, insertAt), 0);
-        patched.set(mehd, insertAt);
-        patched.set(buf.subarray(insertAt), insertAt + 16);
+    const ftyp = mp4FindBox(view, buf, 0, buf.length, 'ftyp');
+    const moov = mp4FindBox(view, buf, 0, buf.length, 'moov');
+    if (!ftyp || !moov) return blob; // structure inattendue, on n'y touche pas
 
-        const patchedView = new DataView(patched.buffer);
-        patchedView.setUint32(mvex.pos, mvex.size + 16);
-        patchedView.setUint32(moov.pos, moov.size + 16);
+    const moofList = mp4FindAllBoxes(view, buf, 0, buf.length, 'moof');
+    if (!moofList.length) return blob; // déjà un MP4 classique (pas fragmenté)
 
-        return new Blob([patched], { type: blob.type });
+    const trafByTrack = new Map();
+    for (const moof of moofList) {
+      const trafs = mp4FindAllBoxes(view, buf, moof.pos + 8, moof.pos + moof.size, 'traf');
+      for (const traf of trafs) {
+        const { trackId, samples } = parseTrafSamples(view, buf, traf.pos, traf.size, moof.pos);
+        if (!trafByTrack.has(trackId)) trafByTrack.set(trackId, []);
+        trafByTrack.get(trackId).push(...samples);
       }
     }
 
-    return new Blob([buf], { type: blob.type });
+    const lastMoof = moofList[moofList.length - 1];
+    const mdat = mp4FindBox(view, buf, lastMoof.pos + lastMoof.size, buf.length, 'mdat');
+    if (!mdat) return blob;
+    const mdatPayloadStart = mdat.pos + 8;
+    const mdatPayload = buf.subarray(mdatPayloadStart, mdat.pos + mdat.size);
+
+    const mvhd = mp4FindBox(view, buf, moov.pos + 8, moov.pos + moov.size, 'mvhd');
+    const mvhdVersion = buf[mvhd.pos + 8];
+    const movieTsOff = mvhd.pos + 8 + 4 + (mvhdVersion === 1 ? 16 : 8);
+    const movieTimescale = view.getUint32(movieTsOff);
+    const mvhdBytes = buf.slice(mvhd.pos, mvhd.pos + mvhd.size);
+
+    const trakBoxes = [];
+    const traks = mp4FindAllBoxes(view, buf, moov.pos + 8, moov.pos + moov.size, 'trak');
+    for (const trak of traks) {
+      const tkhd = mp4FindBox(view, buf, trak.pos + 8, trak.pos + trak.size, 'tkhd');
+      const tkhdVersion = buf[tkhd.pos + 8];
+      const tkIdOff = tkhd.pos + 8 + 4 + (tkhdVersion === 1 ? 16 : 8);
+      const trackId = view.getUint32(tkIdOff);
+      const tkhdBytes = buf.slice(tkhd.pos, tkhd.pos + tkhd.size);
+
+      const mdia = mp4FindBox(view, buf, trak.pos + 8, trak.pos + trak.size, 'mdia');
+      const mdhd = mp4FindBox(view, buf, mdia.pos + 8, mdia.pos + mdia.size, 'mdhd');
+      const mdhdVersion = buf[mdhd.pos + 8];
+      const mdTsOff = mdhd.pos + 8 + 4 + (mdhdVersion === 1 ? 16 : 8);
+      const trackTimescale = view.getUint32(mdTsOff);
+      const mdhdBytes = buf.slice(mdhd.pos, mdhd.pos + mdhd.size);
+
+      const hdlr = mp4FindBox(view, buf, mdia.pos + 8, mdia.pos + mdia.size, 'hdlr');
+      const hdlrBytes = buf.slice(hdlr.pos, hdlr.pos + hdlr.size);
+
+      const minf = mp4FindBox(view, buf, mdia.pos + 8, mdia.pos + mdia.size, 'minf');
+      const vmhd = mp4FindBox(view, buf, minf.pos + 8, minf.pos + minf.size, 'vmhd');
+      const mediaHeader = vmhd || mp4FindBox(view, buf, minf.pos + 8, minf.pos + minf.size, 'smhd');
+      const mhdBytes = buf.slice(mediaHeader.pos, mediaHeader.pos + mediaHeader.size);
+      const dinf = mp4FindBox(view, buf, minf.pos + 8, minf.pos + minf.size, 'dinf');
+      const dinfBytes = buf.slice(dinf.pos, dinf.pos + dinf.size);
+      const stbl = mp4FindBox(view, buf, minf.pos + 8, minf.pos + minf.size, 'stbl');
+      const stsd = mp4FindBox(view, buf, stbl.pos + 8, stbl.pos + stbl.size, 'stsd');
+      const stsdBytes = buf.slice(stsd.pos, stsd.pos + stsd.size);
+
+      const samples = trafByTrack.get(trackId) || [];
+      const n = samples.length;
+      const totalTrackTicks = samples.reduce((s, x) => s + x.duration, 0);
+      const durationInTrackTicks = totalTrackTicks;
+      const movieTicks = Math.round((durationInTrackTicks / (trackTimescale || 1)) * movieTimescale);
+
+      const patchedTkhd = tkhdBytes.slice();
+      const tkhdView = new DataView(patchedTkhd.buffer);
+      const tkDurOff = 8 + 4 + (tkhdVersion === 1 ? 24 : 16);
+      writeDurationField(tkhdView, tkDurOff, tkhdVersion, movieTicks);
+
+      const patchedMdhd = mdhdBytes.slice();
+      const mdhdDurOff = 8 + 4 + (mdhdVersion === 1 ? 16 : 8) + 4;
+      writeDurationField(new DataView(patchedMdhd.buffer), mdhdDurOff, mdhdVersion, totalTrackTicks);
+
+      // stts
+      const sttsEntries = [];
+      for (const s of samples) {
+        if (sttsEntries.length && sttsEntries[sttsEntries.length - 1][1] === s.duration) {
+          sttsEntries[sttsEntries.length - 1][0]++;
+        } else {
+          sttsEntries.push([1, s.duration]);
+        }
+      }
+      const sttsPayload = new Uint8Array(8 + sttsEntries.length * 8);
+      const sttsView = new DataView(sttsPayload.buffer);
+      sttsView.setUint32(4, sttsEntries.length);
+      sttsEntries.forEach(([count, delta], i) => {
+        sttsView.setUint32(8 + i * 8, count);
+        sttsView.setUint32(8 + i * 8 + 4, delta);
+      });
+      const sttsBox = mp4Box('stts', sttsPayload);
+
+      // stsz
+      const stszPayload = new Uint8Array(12 + n * 4);
+      const stszView = new DataView(stszPayload.buffer);
+      stszView.setUint32(8, n);
+      samples.forEach((s, i) => stszView.setUint32(12 + i * 4, s.size));
+      const stszBox = mp4Box('stsz', stszPayload);
+
+      // stsc : un chunk par échantillon (robuste si plusieurs pistes entrelacées)
+      const stscPayload = new Uint8Array(8 + 12);
+      const stscView = new DataView(stscPayload.buffer);
+      stscView.setUint32(4, 1);
+      stscView.setUint32(8, 1);
+      stscView.setUint32(12, 1);
+      stscView.setUint32(16, 1);
+      const stscBox = mp4Box('stsc', stscPayload);
+
+      // stco : un offset absolu par échantillon (calculé après connaître la taille finale du moov)
+      const stcoPayload = new Uint8Array(8 + n * 4);
+      new DataView(stcoPayload.buffer).setUint32(4, n);
+      const stcoBox = mp4Box('stco', stcoPayload);
+
+      const syncIndices = [];
+      samples.forEach((s, i) => { if (s.sync) syncIndices.push(i + 1); });
+      let stssBox = new Uint8Array(0);
+      if (syncIndices.length && syncIndices.length < n) {
+        const stssPayload = new Uint8Array(8 + syncIndices.length * 4);
+        const stssView = new DataView(stssPayload.buffer);
+        stssView.setUint32(4, syncIndices.length);
+        syncIndices.forEach((idx, i) => stssView.setUint32(8 + i * 4, idx));
+        stssBox = mp4Box('stss', stssPayload);
+      }
+
+      const stblBox = mp4Box('stbl', concatBytes([stsdBytes, sttsBox, stscBox, stszBox, stcoBox, stssBox]));
+      const minfBox = mp4Box('minf', concatBytes([mhdBytes, dinfBytes, stblBox]));
+      const mdiaBox = mp4Box('mdia', concatBytes([patchedMdhd, hdlrBytes, minfBox]));
+      const trakBox = mp4Box('trak', concatBytes([patchedTkhd, mdiaBox]));
+
+      trakBoxes.push({ bytes: trakBox, samples, movieTicks });
+    }
+
+    const overallMovieTicks = Math.max(0, ...trakBoxes.map((t) => t.movieTicks));
+    const patchedMvhd = mvhdBytes.slice();
+    writeDurationField(new DataView(patchedMvhd.buffer), movieTsOff - mvhd.pos + 4, mvhdVersion, overallMovieTicks);
+
+    const moovBox = mp4Box('moov', concatBytes([patchedMvhd, ...trakBoxes.map((t) => t.bytes)]));
+    const mdatBox = mp4Box('mdat', mdatPayload);
+    const ftypBytes = buf.slice(ftyp.pos, ftyp.pos + ftyp.size);
+    const headerTotalLen = ftypBytes.length + moovBox.length + 8;
+
+    // Deuxième passe : patcher les stco de chaque piste avec les vrais offsets absolus.
+    const finalTrakBytes = trakBoxes.map(({ bytes, samples }) => {
+      const trakBytes = bytes.slice();
+      const trakView = new DataView(trakBytes.buffer);
+      let markerPos = -1;
+      for (let i = 0; i + 4 <= trakBytes.length; i++) {
+        if (trakBytes[i] === 0x73 && trakBytes[i + 1] === 0x74 && trakBytes[i + 2] === 0x63 && trakBytes[i + 3] === 0x6f) {
+          markerPos = i - 4; // revenir au début de la boîte (avant le tag 'stco')
+          break;
+        }
+      }
+      const entriesStart = markerPos + 4 + 4 + 4 + 4; // size+type+version_flags+entry_count
+      samples.forEach((s, i) => {
+        const newOffset = headerTotalLen + (s.absOffset - mdatPayloadStart);
+        trakView.setUint32(entriesStart + i * 4, newOffset);
+      });
+      return trakBytes;
+    });
+
+    const finalMoovBox = mp4Box('moov', concatBytes([patchedMvhd, ...finalTrakBytes]));
+    const out = concatBytes([ftypBytes, finalMoovBox, mdatBox]);
+    return new Blob([out], { type: blob.type });
   }
 
   /* ===================== Export ===================== */
@@ -1015,9 +1223,9 @@ vec4 transition(vec2 p) {
     let blob = await finished;
     if (blob.type.includes('mp4')) {
       try {
-        blob = await patchMp4Duration(blob, total);
+        blob = await flattenMp4(blob, total);
       } catch (err) {
-        console.error('Impossible de corriger la durée du MP4, envoi du fichier tel quel :', err);
+        console.error('Impossible de défragmenter le MP4, envoi du fichier tel quel :', err);
       }
     }
     currentExportBlob = blob;
