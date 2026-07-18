@@ -78,14 +78,29 @@
         <div class="field">
           <label for="transitionSelect">Transition</label>
           <select id="transitionSelect" class="select">
-            <option value="crossfade">Fondu croisé</option>
-            <option value="fadeBlack">Fondu au noir</option>
-            <option value="fadeWhite">Fondu au blanc</option>
-            <option value="slide">Glissement</option>
-            <option value="kenburns">Zoom Ken Burns</option>
-            <option value="dissolve">Dissolve granuleux</option>
-            <option value="morph">Morphing doux</option>
+            <optgroup label="Classiques">
+              <option value="crossfade">Fondu croisé</option>
+              <option value="fadeBlack">Fondu au noir</option>
+              <option value="fadeWhite">Fondu au blanc</option>
+              <option value="slide">Glissement</option>
+              <option value="kenburns">Zoom Ken Burns</option>
+            </optgroup>
+            <optgroup label="Premium ✨">
+              <option value="dissolve">Dissolve granuleux</option>
+              <option value="morph">Morphing doux</option>
+              <option value="crosszoom">Cross Zoom</option>
+              <option value="cube">Cube 3D</option>
+              <option value="doorway">Porte dérobée</option>
+            </optgroup>
           </select>
+        </div>
+
+        <div class="field field-row field-toggle">
+          <label class="checkbox-label" for="randomTransitionsToggle">
+            <input id="randomTransitionsToggle" type="checkbox" />
+            Transitions aléatoires
+          </label>
+          <p class="field-hint">Un style différent à chaque changement de photo, piochée parmi toutes les transitions ci-dessus.</p>
         </div>
 
         <div class="field">

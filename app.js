@@ -7,6 +7,7 @@
   const state = {
     photos: [],           // { id, file, url, img, durationOverride }
     transition: 'kenburns',
+    randomTransitions: false,
     transitionDuration: 0.7,
     globalDuration: 3.0,
     template: 'voyage',
@@ -16,6 +17,13 @@
     playing: false,
     exporting: false,
   };
+
+  // Piscine des styles piochés en mode "transitions aléatoires" (le zoom Ken Burns n'y
+  // figure pas : c'est un effet continu, pas un style de coupure entre deux photos).
+  const RANDOM_TRANSITION_POOL = [
+    'crossfade', 'fadeBlack', 'fadeWhite', 'slide',
+    'dissolve', 'morph', 'crosszoom', 'cube', 'doorway',
+  ];
 
   const TEMPLATES = {
     romantique: { transition: 'crossfade', duration: 4.0, transitionDuration: 1.0 },
@@ -56,6 +64,7 @@
 
   const templateSelect = $('templateSelect');
   const transitionSelect = $('transitionSelect');
+  const randomTransitionsToggle = $('randomTransitionsToggle');
   const durationRange = $('durationRange');
   const durationValue = $('durationValue');
   const transitionDurationRange = $('transitionDurationRange');
@@ -374,7 +383,10 @@
     state.transition = preset.transition;
     state.globalDuration = preset.duration;
     state.transitionDuration = preset.transitionDuration;
+    state.randomTransitions = false;
     transitionSelect.value = preset.transition;
+    transitionSelect.disabled = false;
+    randomTransitionsToggle.checked = false;
     durationRange.value = preset.duration;
     transitionDurationRange.value = preset.transitionDuration;
     durationValue.textContent = `${preset.duration.toFixed(1).replace('.', ',')} s`;
@@ -392,6 +404,13 @@
 
   transitionSelect.addEventListener('change', () => {
     state.transition = transitionSelect.value;
+    markCustom();
+    renderPreviewFrame(0);
+  });
+
+  randomTransitionsToggle.addEventListener('change', () => {
+    state.randomTransitions = randomTransitionsToggle.checked;
+    transitionSelect.disabled = state.randomTransitions;
     markCustom();
     renderPreviewFrame(0);
   });
@@ -477,6 +496,16 @@
     return { dx: Math.cos(angle) * 0.06, dy: Math.sin(angle) * 0.06 };
   }
 
+  // Style de transition pour la coupure qui SUIT la photo `id` — pseudo-aléatoire mais stable
+  // (même id -> même style à chaque rendu, en aperçu comme à l'export), pour ne jamais changer
+  // d'un rendu à l'autre. Repose sur la même technique d'angle d'or que kenBurnsVector.
+  function transitionForBoundary(id) {
+    if (!state.randomTransitions) return state.transition;
+    const angle = (id * 2.399963) % (Math.PI * 2);
+    const index = Math.floor((angle / (Math.PI * 2)) * RANDOM_TRANSITION_POOL.length);
+    return RANDOM_TRANSITION_POOL[Math.min(index, RANDOM_TRANSITION_POOL.length - 1)];
+  }
+
   /* ===================== gl-transitions (gl-transitions.com, MIT) ===================== */
   // Shaders vendorisés depuis https://github.com/gl-transitions/gl-transitions
   // (vendor/gl-transitions/). Intégrés en chaîne pour éviter une dépendance de build.
@@ -524,11 +553,142 @@ vec4 transition(vec2 p) {
   float w1 = 1.0 - w0;
   return mix(getFromColor(p + oc * w0), getToColor(p - oc * w1), progress);
 }`,
+    crosszoom: `
+// Author: rectalogic — License: MIT
+uniform float strength; // = 0.4
+const float PI = 3.141592653589793;
+float Linear_ease(in float begin, in float change, in float duration, in float time) {
+  return change * time / duration + begin;
+}
+float Exponential_easeInOut(in float begin, in float change, in float duration, in float time) {
+  if (time == 0.0) return begin;
+  else if (time == duration) return begin + change;
+  time = time / (duration / 2.0);
+  if (time < 1.0) return change / 2.0 * pow(2.0, 10.0 * (time - 1.0)) + begin;
+  return change / 2.0 * (-pow(2.0, -10.0 * (time - 1.0)) + 2.0) + begin;
+}
+float Sinusoidal_easeInOut(in float begin, in float change, in float duration, in float time) {
+  return -change / 2.0 * (cos(PI * time / duration) - 1.0) + begin;
+}
+float czRand(vec2 co) {
+  return fract(sin(dot(co.xy, vec2(12.9898, 78.233))) * 43758.5453);
+}
+vec4 czCrossFade(in vec2 uv, in float dissolve) {
+  return mix(getFromColor(uv), getToColor(uv), dissolve);
+}
+vec4 transition(vec2 uv) {
+  vec2 texCoord = uv.xy / vec2(1.0).xy;
+  vec2 center = vec2(Linear_ease(0.25, 0.5, 1.0, progress), 0.5);
+  float dissolve = Exponential_easeInOut(0.0, 1.0, 1.0, progress);
+  float strengthEase = Sinusoidal_easeInOut(0.0, strength, 0.5, progress);
+  vec4 color = vec4(0.0);
+  float total = 0.0;
+  vec2 toCenter = center - texCoord;
+  float offset = czRand(uv);
+  for (float t = 0.0; t <= 40.0; t++) {
+    float percent = (t + offset) / 40.0;
+    float weight = 4.0 * (percent - percent * percent);
+    color += czCrossFade(texCoord + toCenter * percent * strengthEase, dissolve) * weight;
+    total += weight;
+  }
+  return color / total;
+}`,
+    cube: `
+// Author: gre — License: MIT
+uniform float persp; // = 0.7
+uniform float unzoom; // = 0.3
+uniform float reflection; // = 0.4
+uniform float floating; // = 3.0
+vec2 cubeProject(vec2 p) {
+  return p * vec2(1.0, -1.2) + vec2(0.0, -floating / 100.0);
+}
+bool cubeInBounds(vec2 p) {
+  return all(lessThan(vec2(0.0), p)) && all(lessThan(p, vec2(1.0)));
+}
+vec4 cubeBgColor(vec2 p, vec2 pfr, vec2 pto) {
+  vec4 c = vec4(0.0, 0.0, 0.0, 1.0);
+  pfr = cubeProject(pfr);
+  if (cubeInBounds(pfr)) {
+    c += mix(vec4(0.0), getFromColor(pfr), reflection * mix(1.0, 0.0, pfr.y));
+  }
+  pto = cubeProject(pto);
+  if (cubeInBounds(pto)) {
+    c += mix(vec4(0.0), getToColor(pto), reflection * mix(1.0, 0.0, pto.y));
+  }
+  return c;
+}
+vec2 cubeXskew(vec2 p, float persp2, float center) {
+  float x = mix(p.x, 1.0 - p.x, center);
+  return (
+    (
+      vec2(x, (p.y - 0.5 * (1.0 - persp2) * x) / (1.0 + (persp2 - 1.0) * x))
+      - vec2(0.5 - distance(center, 0.5), 0.0)
+    )
+    * vec2(0.5 / distance(center, 0.5) * (center < 0.5 ? 1.0 : -1.0), 1.0)
+    + vec2(center < 0.5 ? 0.0 : 1.0, 0.0)
+  );
+}
+vec4 transition(vec2 op) {
+  float uz = unzoom * 2.0 * (0.5 - distance(0.5, progress));
+  vec2 p = -uz * 0.5 + (1.0 + uz) * op;
+  vec2 fromP = cubeXskew(
+    (p - vec2(progress, 0.0)) / vec2(1.0 - progress, 1.0),
+    1.0 - mix(progress, 0.0, persp),
+    0.0
+  );
+  vec2 toP = cubeXskew(
+    p / vec2(progress, 1.0),
+    mix(pow(progress, 2.0), 1.0, persp),
+    1.0
+  );
+  if (cubeInBounds(fromP)) return getFromColor(fromP);
+  else if (cubeInBounds(toP)) return getToColor(toP);
+  return cubeBgColor(op, fromP, toP);
+}`,
+    doorway: `
+// Author: gre — License: MIT
+uniform float reflection; // = 0.4
+uniform float perspective; // = 0.4
+uniform float depth; // = 3.0
+const vec4 doorwayBlack = vec4(0.0, 0.0, 0.0, 1.0);
+bool doorwayInBounds(vec2 p) {
+  return all(lessThan(vec2(0.0), p)) && all(lessThan(p, vec2(1.0)));
+}
+vec2 doorwayProject(vec2 p) {
+  return p * vec2(1.0, -1.2) + vec2(0.0, -0.02);
+}
+vec4 doorwayBgColor(vec2 p, vec2 pto) {
+  vec4 c = doorwayBlack;
+  pto = doorwayProject(pto);
+  if (doorwayInBounds(pto)) {
+    c += mix(doorwayBlack, getToColor(pto), reflection * mix(1.0, 0.0, pto.y));
+  }
+  return c;
+}
+vec4 transition(vec2 p) {
+  vec2 pfr = vec2(-1.0), pto = vec2(-1.0);
+  float middleSlit = 2.0 * abs(p.x - 0.5) - progress;
+  if (middleSlit > 0.0) {
+    pfr = p + (p.x > 0.5 ? -1.0 : 1.0) * vec2(0.5 * progress, 0.0);
+    float d = 1.0 / (1.0 + perspective * progress * (1.0 - middleSlit));
+    pfr.y -= d / 2.0;
+    pfr.y *= d;
+    pfr.y += d / 2.0;
+  }
+  float size = mix(1.0, depth, 1.0 - progress);
+  pto = (p + vec2(-0.5, -0.5)) * vec2(size, size) + vec2(0.5, 0.5);
+  if (doorwayInBounds(pfr)) return getFromColor(pfr);
+  else if (doorwayInBounds(pto)) return getToColor(pto);
+  else return doorwayBgColor(p, pto);
+}`,
   };
 
   const GL_TRANSITION_DEFAULTS = {
     dissolve: { scale: 4.0, smoothness: 0.01, seed: 12.9898 },
     morph: { strength: 0.1 },
+    crosszoom: { strength: 0.4 },
+    cube: { persp: 0.7, unzoom: 0.3, reflection: 0.4, floating: 3.0 },
+    doorway: { reflection: 0.4, perspective: 0.4, depth: 3.0 },
   };
 
   function createGlEngine() {
@@ -645,7 +805,7 @@ vec4 transition(vec2 p) {
   }
 
   const glEngine = createGlEngine();
-  const GL_TRANSITIONS = new Set(['dissolve', 'morph']);
+  const GL_TRANSITIONS = new Set(['dissolve', 'morph', 'crosszoom', 'cube', 'doorway']);
 
   function getCoverCanvas(photo, w, h) {
     const key = `${w}x${h}`;
@@ -730,8 +890,9 @@ vec4 transition(vec2 p) {
       const zoomA = zoomFor(local, D);
       const zoomB = zoomFor(0, next.duration);
       const panA = panFor(current.photo.id, local, D);
+      const boundaryTransition = transitionForBoundary(current.photo.id);
 
-      if (state.transition === 'slide') {
+      if (boundaryTransition === 'slide') {
         ctx.save();
         ctx.beginPath();
         ctx.rect(0, 0, w, h);
@@ -745,8 +906,8 @@ vec4 transition(vec2 p) {
         drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
         ctx.restore();
         ctx.restore();
-      } else if (state.transition === 'fadeBlack' || state.transition === 'fadeWhite') {
-        ctx.fillStyle = state.transition === 'fadeWhite' ? '#fff' : '#000';
+      } else if (boundaryTransition === 'fadeBlack' || boundaryTransition === 'fadeWhite') {
+        ctx.fillStyle = boundaryTransition === 'fadeWhite' ? '#fff' : '#000';
         ctx.fillRect(0, 0, w, h);
         const outAlpha = Math.max(0, 1 - blend * 2);
         const inAlpha = Math.max(0, blend * 2 - 1);
@@ -755,10 +916,10 @@ vec4 transition(vec2 p) {
         ctx.globalAlpha = inAlpha;
         drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
         ctx.globalAlpha = 1;
-      } else if (GL_TRANSITIONS.has(state.transition) && glEngine) {
+      } else if (GL_TRANSITIONS.has(boundaryTransition) && glEngine) {
         const fromCanvas = getCoverCanvas(current.photo, w, h);
         const toCanvas = getCoverCanvas(next.photo, w, h);
-        const ok = glEngine.render(state.transition, fromCanvas, toCanvas, blend, w, h);
+        const ok = glEngine.render(boundaryTransition, fromCanvas, toCanvas, blend, w, h);
         if (ok) {
           ctx.drawImage(glEngine.canvas, 0, 0, w, h);
         } else {

@@ -2,13 +2,14 @@
 
 Application de montage photo premium — transitions élégantes, fondus, durée d'affichage réglable, musique de fond et partage direct sur WhatsApp.
 
-Site **statique**, sans framework ni étape de build : 3 fichiers (`index.html`, `style.css`, `app.js`) + `manifest.json` et `icons/` pour l'icône et l'ajout à l'écran d'accueil. Tout le traitement (rendu des transitions et génération de la vidéo) se fait **côté client**, dans le navigateur — aucune photo n'est envoyée à un serveur.
+Site **statique**, sans framework ni étape de build : `index.html`, `style.css`, `app.js`, `manifest.json` et les fichiers d'icône (`icon.svg`, `apple-touch-icon.png`, `icon-192.png`, `icon-512.png`) — tous à la racine, pour rester compatibles avec un upload par glisser-déposer sur GitHub (qui ne recrée pas de sous-dossiers). Tout le traitement (rendu des transitions et génération de la vidéo) se fait **côté client**, dans le navigateur — aucune photo n'est envoyée à un serveur.
 
 ## Fonctionnalités
 
 - Import de photos par sélection ou glisser-déposer.
 - Réorganisation des photos (glisser-déposer sur desktop, boutons ‹ › partout ailleurs).
-- 7 transitions : fondu croisé, fondu au noir, fondu au blanc, glissement, zoom Ken Burns, dissolve granuleux, morphing doux.
+- 10 transitions : fondu croisé, fondu au noir, fondu au blanc, glissement, zoom Ken Burns (Classiques) + dissolve granuleux, morphing doux, Cross Zoom, Cube 3D, Porte dérobée (Premium ✨).
+- Option « Transitions aléatoires » : un style différent (mais stable) à chaque changement de photo, piochée parmi toutes les transitions.
 - Durée d'affichage réglable globalement, avec possibilité de durée personnalisée par photo.
 - Musique de fond optionnelle, mixée dans l'export.
 - Filigrane texte optionnel.
@@ -31,10 +32,11 @@ Puis ouvrir `http://localhost:8000`. `MediaRecorder` et le partage de fichiers n
 
 ## Notes techniques
 
-- Les transitions « Dissolve granuleux » et « Morphing doux » utilisent deux shaders GLSL de la
-  bibliothèque [gl-transitions](https://github.com/gl-transitions/gl-transitions) (MIT), vendorisés
-  dans `vendor/gl-transitions/` et intégrés à `app.js` via un petit moteur WebGL (aucune dépendance
-  de build). Repli automatique sur un fondu croisé si WebGL n'est pas disponible.
+- Les 5 transitions « Premium » (Dissolve granuleux, Morphing doux, Cross Zoom, Cube 3D, Porte
+  dérobée) utilisent des shaders GLSL de la bibliothèque
+  [gl-transitions](https://github.com/gl-transitions/gl-transitions) (MIT), vendorisés dans
+  `vendor/gl-transitions/` et intégrés à `app.js` via un petit moteur WebGL (aucune dépendance de
+  build). Repli automatique sur un fondu croisé si WebGL n'est pas disponible.
 - L'export vidéo se déroule en temps réel (la génération dure aussi longtemps que la vidéo finale) car elle repose sur la capture du flux du canvas — c'est la contrepartie du traitement 100 % côté client, sans dépendance lourde type `ffmpeg.wasm`.
 - Format de sortie : MP4 (H.264/AAC) en priorité — c'est le seul format que WhatsApp accepte de façon fiable pour un partage vidéo. Repli sur WebM (VP9/VP8 + Opus) si le navigateur ne sait pas encoder de MP4 côté client.
 - Aucune dépendance externe, aucun `package.json` : à héberger tel quel sur n'importe quel hébergeur statique.

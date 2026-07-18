@@ -342,6 +342,13 @@ button { font-family: inherit; }
 }
 
 .field-row { display: flex; flex-direction: column; }
+
+.checkbox-label {
+  display: flex; align-items: center; gap: 9px; cursor: pointer; user-select: none;
+  font-size: 0.88rem; color: var(--text); font-weight: 500;
+}
+.checkbox-label input { accent-color: var(--accent); width: 17px; height: 17px; }
+.field-hint { font-size: 0.78rem; color: var(--text-faint); margin: 6px 0 0; line-height: 1.4; }
 .music-row { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .music-name { font-size: 0.82rem; color: var(--text-faint); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
