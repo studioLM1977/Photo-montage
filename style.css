@@ -254,13 +254,27 @@ button { font-family: inherit; }
   background: var(--bg-elevated);
   border: 1px solid var(--panel-border);
   cursor: grab;
+  touch-action: none;
   animation: cardIn 0.4s var(--ease-spring) backwards;
   transition: transform 0.2s var(--ease-spring), box-shadow 0.2s;
 }
 .photo-card:active { cursor: grabbing; }
-.photo-card.dragging { opacity: 0.4; }
-.photo-card.drag-over { box-shadow: 0 0 0 2px var(--accent); }
 .photo-card:hover { transform: translateY(-3px); box-shadow: var(--shadow-soft); }
+
+.photo-card.dragging-active {
+  position: fixed;
+  z-index: 50;
+  margin: 0;
+  cursor: grabbing;
+  box-shadow: var(--shadow-lift);
+  transform: scale(1.04) rotate(-1deg);
+  transition: none;
+  pointer-events: none;
+}
+.photo-card-placeholder {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: 2px dashed var(--accent);
+}
 
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(0.94); } to { opacity: 1; transform: none; } }
 

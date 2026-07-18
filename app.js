@@ -267,13 +267,13 @@
     state.photos.forEach((photo, index) => {
       const li = document.createElement('li');
       li.className = 'photo-card';
-      li.draggable = true;
       li.dataset.id = photo.id;
       li.style.animationDelay = `${Math.min(index, 12) * 0.03}s`;
 
       const img = document.createElement('img');
       img.src = photo.url;
       img.alt = `Photo ${index + 1}`;
+      img.style.objectPosition = `${photo.focusX * 100}% ${photo.focusY * 100}%`;
       li.appendChild(img);
 
       const badge = document.createElement('span');
@@ -334,27 +334,10 @@
       durationWrap.appendChild(durationInput);
       li.appendChild(durationWrap);
 
-      // Desktop drag & drop reorder
-      li.addEventListener('dragstart', () => li.classList.add('dragging'));
-      li.addEventListener('dragend', () => {
-        li.classList.remove('dragging');
-        document.querySelectorAll('.photo-card.drag-over').forEach((el) => el.classList.remove('drag-over'));
-      });
-      li.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        li.classList.add('drag-over');
-      });
-      li.addEventListener('dragleave', () => li.classList.remove('drag-over'));
-      li.addEventListener('drop', (e) => {
-        e.preventDefault();
-        li.classList.remove('drag-over');
-        const draggingEl = photoGrid.querySelector('.photo-card.dragging');
-        if (!draggingEl || draggingEl === li) return;
-        const fromId = Number(draggingEl.dataset.id);
-        const toId = Number(li.dataset.id);
-        const fromIdx = state.photos.findIndex((p) => p.id === fromId);
-        const toIdx = state.photos.findIndex((p) => p.id === toId);
-        movePhoto(fromIdx, toIdx);
+      // Glisser-déposer (souris + tactile, via Pointer Events)
+      li.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button, input')) return;
+        startCardDrag(li, photo, e);
       });
 
       photoGrid.appendChild(li);
@@ -368,6 +351,84 @@
     if (toIdx < 0 || toIdx >= state.photos.length || fromIdx === toIdx) return;
     const [item] = state.photos.splice(fromIdx, 1);
     state.photos.splice(toIdx, 0, item);
+    renderGrid();
+    renderPreviewFrame(0);
+  }
+
+  // Réorganisation par glisser-déposer (Pointer Events, souris + tactile).
+  // La carte suit le doigt/pointeur en position fixed ; un placeholder tient sa place
+  // dans la grille et se déplace en direct au survol d'une autre carte (l'ordre du DOM
+  // pilote l'ordre visuel de la grille CSS, donc déplacer le placeholder suffit à
+  // prévisualiser le nouvel ordre sans dupliquer state.photos avant la fin du geste).
+  let cardDrag = null;
+
+  function isBeforeTarget(clientX, clientY, rect) {
+    const band = rect.height * 0.3;
+    if (clientY < rect.top + band) return true;
+    if (clientY > rect.bottom - band) return false;
+    return clientX < rect.left + rect.width / 2;
+  }
+
+  function startCardDrag(li, photo, e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    const rect = li.getBoundingClientRect();
+    const placeholder = document.createElement('li');
+    placeholder.className = 'photo-card photo-card-placeholder';
+    li.after(placeholder);
+
+    cardDrag = { photo, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, originLeft: rect.left, originTop: rect.top, placeholder };
+
+    li.classList.add('dragging-active');
+    li.style.width = `${rect.width}px`;
+    li.style.height = `${rect.height}px`;
+    li.style.left = `${rect.left}px`;
+    li.style.top = `${rect.top}px`;
+
+    li.setPointerCapture(e.pointerId);
+    li.addEventListener('pointermove', onCardDragMove);
+    li.addEventListener('pointerup', onCardDragEnd);
+    li.addEventListener('pointercancel', onCardDragEnd);
+  }
+
+  function onCardDragMove(e) {
+    if (!cardDrag) return;
+    const li = e.currentTarget;
+    li.style.left = `${cardDrag.originLeft + (e.clientX - cardDrag.startX)}px`;
+    li.style.top = `${cardDrag.originTop + (e.clientY - cardDrag.startY)}px`;
+
+    const target = document.elementFromPoint(e.clientX, e.clientY);
+    const targetCard = target && target.closest('.photo-card');
+    if (!targetCard || targetCard === li || targetCard.classList.contains('photo-card-placeholder') || !photoGrid.contains(targetCard)) return;
+    const rect = targetCard.getBoundingClientRect();
+    if (isBeforeTarget(e.clientX, e.clientY, rect)) {
+      targetCard.before(cardDrag.placeholder);
+    } else {
+      targetCard.after(cardDrag.placeholder);
+    }
+  }
+
+  function onCardDragEnd(e) {
+    if (!cardDrag) return;
+    const li = e.currentTarget;
+    li.releasePointerCapture(cardDrag.pointerId);
+    li.removeEventListener('pointermove', onCardDragMove);
+    li.removeEventListener('pointerup', onCardDragEnd);
+    li.removeEventListener('pointercancel', onCardDragEnd);
+
+    const domOrder = Array.from(photoGrid.children)
+      .filter((el) => el !== li)
+      .map((el) => (el === cardDrag.placeholder ? cardDrag.photo.id : Number(el.dataset.id)));
+    state.photos = domOrder.map((id) => state.photos.find((p) => p.id === id));
+
+    cardDrag.placeholder.remove();
+    li.classList.remove('dragging-active');
+    li.style.width = '';
+    li.style.height = '';
+    li.style.left = '';
+    li.style.top = '';
+    cardDrag = null;
+
     renderGrid();
     renderPreviewFrame(0);
   }
@@ -1614,6 +1675,7 @@ vec4 transition(vec2 p) {
     if (recenterPhoto) {
       recenterPhoto.focusX = recenterFocusX;
       recenterPhoto.focusY = recenterFocusY;
+      renderGrid();
       renderPreviewFrame(0);
     }
     closeRecenterModal();
