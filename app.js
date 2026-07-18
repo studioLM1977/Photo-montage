@@ -108,6 +108,13 @@
   const whatsappHelpClose = $('whatsappHelpClose');
   const whatsappHelpSkip = $('whatsappHelpSkip');
 
+  const recenterModal = $('recenterModal');
+  const recenterCanvas = $('recenterCanvas');
+  const recenterCtx = ctx2d(recenterCanvas);
+  const recenterCancelBtn = $('recenterCancelBtn');
+  const recenterResetBtn = $('recenterResetBtn');
+  const recenterConfirmBtn = $('recenterConfirmBtn');
+
   const historyList = $('historyList');
   const themeToggle = $('themeToggle');
   const toastRoot = $('toastRoot');
@@ -236,7 +243,7 @@
         try {
           const rawImg = await loadImage(url);
           const img = normalizePhotoImage(rawImg);
-          return { id: nextId++, file, url, img, durationOverride: null };
+          return { id: nextId++, file, url, img, durationOverride: null, focusX: 0.5, focusY: 0.5 };
         } catch (err) {
           showToast(`Impossible de charger "${file.name}"`, 'info');
           URL.revokeObjectURL(url);
@@ -300,6 +307,14 @@
       moveRight.addEventListener('click', () => movePhoto(index, index + 1));
       moveWrap.append(moveLeft, moveRight);
       li.appendChild(moveWrap);
+
+      const recenterBtn = document.createElement('button');
+      recenterBtn.type = 'button';
+      recenterBtn.className = 'photo-card-recenter';
+      recenterBtn.setAttribute('aria-label', 'Recadrer cette photo');
+      recenterBtn.innerHTML = '⛶';
+      recenterBtn.addEventListener('click', () => openRecenterModal(photo));
+      li.appendChild(recenterBtn);
 
       const durationWrap = document.createElement('div');
       durationWrap.className = 'photo-card-duration';
@@ -808,27 +823,31 @@ vec4 transition(vec2 p) {
   const GL_TRANSITIONS = new Set(['dissolve', 'morph', 'crosszoom', 'cube', 'doorway']);
 
   function getCoverCanvas(photo, w, h) {
-    const key = `${w}x${h}`;
+    const key = `${w}x${h}:${photo.focusX}:${photo.focusY}`;
     if (photo._cover && photo._cover.key === key) return photo._cover.canvas;
     const c = document.createElement('canvas');
     c.width = w;
     c.height = h;
-    drawCover(ctx2d(c), photo.img, 0, 0, w, h);
+    drawCover(ctx2d(c), photo.img, 0, 0, w, h, 1, 0, 0, photo.focusX, photo.focusY);
     photo._cover = { key, canvas: c };
     return c;
   }
 
   /* ===================== Canvas drawing ===================== */
 
-  function drawCover(ctx, img, cx, cy, cw, ch, zoom = 1, panX = 0, panY = 0) {
+  function drawCover(ctx, img, cx, cy, cw, ch, zoom = 1, panX = 0, panY = 0, focusX = 0.5, focusY = 0.5) {
     if (!img) return;
     const { w: iw, h: ih } = mediaSize(img);
     if (!iw || !ih) return;
     const scale = Math.max(cw / iw, ch / ih) * zoom;
     const dw = iw * scale;
     const dh = ih * scale;
-    const dx = cx + (cw - dw) / 2 + panX * cw;
-    const dy = cy + (ch - dh) / 2 + panY * ch;
+    let dx = cx + cw / 2 - focusX * dw + panX * cw;
+    let dy = cy + ch / 2 - focusY * dh + panY * ch;
+    // Le point de focus ne doit jamais découvrir de bord vide : on le contraint à la
+    // plage qui garde la photo en "cover" complet du cadre.
+    dx = Math.max(cx + cw - dw, Math.min(cx, dx));
+    dy = Math.max(cy + ch - dh, Math.min(cy, dy));
     ctx.drawImage(img, dx, dy, dw, dh);
   }
 
@@ -882,7 +901,7 @@ vec4 transition(vec2 p) {
     if (!inTransition) {
       const zoom = zoomFor(local, D);
       const pan = panFor(current.photo.id, local, D);
-      drawCover(ctx, current.photo.img, 0, 0, w, h, zoom, pan.x, pan.y);
+      drawCover(ctx, current.photo.img, 0, 0, w, h, zoom, pan.x, pan.y, current.photo.focusX, current.photo.focusY);
     } else {
       const next = timeline[current.index + 1];
       const rawBlend = (local - (D - td)) / td;
@@ -899,11 +918,11 @@ vec4 transition(vec2 p) {
         ctx.clip();
         ctx.save();
         ctx.translate(-blend * w, 0);
-        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y);
+        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y, current.photo.focusX, current.photo.focusY);
         ctx.restore();
         ctx.save();
         ctx.translate((1 - blend) * w, 0);
-        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
+        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0, next.photo.focusX, next.photo.focusY);
         ctx.restore();
         ctx.restore();
       } else if (boundaryTransition === 'fadeBlack' || boundaryTransition === 'fadeWhite') {
@@ -912,9 +931,9 @@ vec4 transition(vec2 p) {
         const outAlpha = Math.max(0, 1 - blend * 2);
         const inAlpha = Math.max(0, blend * 2 - 1);
         ctx.globalAlpha = outAlpha;
-        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y);
+        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y, current.photo.focusX, current.photo.focusY);
         ctx.globalAlpha = inAlpha;
-        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
+        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0, next.photo.focusX, next.photo.focusY);
         ctx.globalAlpha = 1;
       } else if (GL_TRANSITIONS.has(boundaryTransition) && glEngine) {
         const fromCanvas = getCoverCanvas(current.photo, w, h);
@@ -924,17 +943,17 @@ vec4 transition(vec2 p) {
           ctx.drawImage(glEngine.canvas, 0, 0, w, h);
         } else {
           ctx.globalAlpha = 1 - blend;
-          drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y);
+          drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y, current.photo.focusX, current.photo.focusY);
           ctx.globalAlpha = blend;
-          drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
+          drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0, next.photo.focusX, next.photo.focusY);
           ctx.globalAlpha = 1;
         }
       } else {
         // crossfade / kenburns
         ctx.globalAlpha = 1 - blend;
-        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y);
+        drawCover(ctx, current.photo.img, 0, 0, w, h, zoomA, panA.x, panA.y, current.photo.focusX, current.photo.focusY);
         ctx.globalAlpha = blend;
-        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0);
+        drawCover(ctx, next.photo.img, 0, 0, w, h, zoomB, 0, 0, next.photo.focusX, next.photo.focusY);
         ctx.globalAlpha = 1;
       }
     }
@@ -1520,6 +1539,88 @@ vec4 transition(vec2 p) {
     photoCount.textContent = '0';
     currentExportBlob = null;
     currentExportUrl = null;
+  });
+
+  /* ===================== Recenter modal ===================== */
+
+  let recenterPhoto = null;
+  let recenterFocusX = 0.5;
+  let recenterFocusY = 0.5;
+  let recenterDrag = null;
+
+  function drawRecenterFrame() {
+    const w = recenterCanvas.width;
+    const h = recenterCanvas.height;
+    recenterCtx.clearRect(0, 0, w, h);
+    if (!recenterPhoto) return;
+    drawCover(recenterCtx, recenterPhoto.img, 0, 0, w, h, 1, 0, 0, recenterFocusX, recenterFocusY);
+  }
+
+  function openRecenterModal(photo) {
+    recenterPhoto = photo;
+    recenterFocusX = photo.focusX;
+    recenterFocusY = photo.focusY;
+    drawRecenterFrame();
+    recenterModal.classList.remove('hidden');
+  }
+
+  function closeRecenterModal() {
+    recenterModal.classList.add('hidden');
+    recenterPhoto = null;
+    recenterDrag = null;
+  }
+
+  recenterCanvas.addEventListener('pointerdown', (e) => {
+    if (!recenterPhoto) return;
+    recenterCanvas.setPointerCapture(e.pointerId);
+    const { w: iw, h: ih } = mediaSize(recenterPhoto.img);
+    if (!iw || !ih) return;
+    const cw = recenterCanvas.width;
+    const ch = recenterCanvas.height;
+    const scale = Math.max(cw / iw, ch / ih);
+    const rect = recenterCanvas.getBoundingClientRect();
+    recenterDrag = {
+      startX: e.clientX,
+      startY: e.clientY,
+      startFocusX: recenterFocusX,
+      startFocusY: recenterFocusY,
+      dw: iw * scale,
+      dh: ih * scale,
+      pixelScaleX: cw / rect.width,
+      pixelScaleY: ch / rect.height,
+    };
+  });
+
+  recenterCanvas.addEventListener('pointermove', (e) => {
+    if (!recenterDrag) return;
+    const deltaX = (e.clientX - recenterDrag.startX) * recenterDrag.pixelScaleX;
+    const deltaY = (e.clientY - recenterDrag.startY) * recenterDrag.pixelScaleY;
+    recenterFocusX = Math.max(0, Math.min(1, recenterDrag.startFocusX - deltaX / recenterDrag.dw));
+    recenterFocusY = Math.max(0, Math.min(1, recenterDrag.startFocusY - deltaY / recenterDrag.dh));
+    drawRecenterFrame();
+  });
+
+  function endRecenterDrag() { recenterDrag = null; }
+  recenterCanvas.addEventListener('pointerup', endRecenterDrag);
+  recenterCanvas.addEventListener('pointercancel', endRecenterDrag);
+
+  recenterResetBtn.addEventListener('click', () => {
+    recenterFocusX = 0.5;
+    recenterFocusY = 0.5;
+    drawRecenterFrame();
+  });
+
+  recenterConfirmBtn.addEventListener('click', () => {
+    if (recenterPhoto) {
+      recenterPhoto.focusX = recenterFocusX;
+      recenterPhoto.focusY = recenterFocusY;
+      renderPreviewFrame(0);
+    }
+    closeRecenterModal();
+  });
+
+  recenterCancelBtn.addEventListener('click', () => {
+    closeRecenterModal();
   });
 
   /* ===================== History ===================== */

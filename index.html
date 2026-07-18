@@ -202,6 +202,21 @@
     </div>
   </div>
 
+  <div id="recenterModal" class="recenter-modal hidden">
+    <div class="recenter-card">
+      <h3>Recadrer la photo</h3>
+      <p class="recenter-hint">Faites glisser la photo pour centrer le sujet dans le cadre.</p>
+      <div class="recenter-stage">
+        <canvas id="recenterCanvas" width="360" height="640" aria-label="Zone de recadrage"></canvas>
+      </div>
+      <div class="recenter-actions">
+        <button id="recenterCancelBtn" class="btn btn-ghost btn-sm" type="button">Annuler</button>
+        <button id="recenterResetBtn" class="btn btn-ghost btn-sm" type="button">Centrer</button>
+        <button id="recenterConfirmBtn" class="btn btn-primary btn-sm" type="button">Valider</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Historique -->
   <section id="historySection" class="history-section hidden">
     <h2>Montages précédents</h2>

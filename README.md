@@ -8,6 +8,7 @@ Site **statique**, sans framework ni étape de build : `index.html`, `style.css`
 
 - Import de photos par sélection ou glisser-déposer.
 - Réorganisation des photos (glisser-déposer sur desktop, boutons ‹ › partout ailleurs).
+- Recadrage manuel par photo (bouton ⛶ sur chaque vignette) : on fait glisser la photo dans un cadre 9:16 pour centrer le sujet (visage, personnes…) avant l'export — utile quand le cadrage automatique en « cover » coupe les têtes sur une photo panoramique ou en format paysage.
 - 10 transitions : fondu croisé, fondu au noir, fondu au blanc, glissement, zoom Ken Burns (Classiques) + dissolve granuleux, morphing doux, Cross Zoom, Cube 3D, Porte dérobée (Premium ✨).
 - Option « Transitions aléatoires » : un style différent (mais stable) à chaque changement de photo, piochée parmi toutes les transitions.
 - Durée d'affichage réglable globalement, avec possibilité de durée personnalisée par photo.
