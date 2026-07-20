@@ -115,6 +115,10 @@
   const recenterResetBtn = $('recenterResetBtn');
   const recenterConfirmBtn = $('recenterConfirmBtn');
 
+  const lightboxModal = $('lightboxModal');
+  const lightboxImg = $('lightboxImg');
+  const lightboxClose = $('lightboxClose');
+
   const historyList = $('historyList');
   const themeToggle = $('themeToggle');
   const toastRoot = $('toastRoot');
@@ -267,19 +271,21 @@
   // gardée à l'export (calcul en pourcentages à partir des seuls ratios d'aspect,
   // donc valable quelle que soit la taille réelle de la carte à l'écran).
   const CARD_AR = 3 / 4;
+  const WIDE_CARD_AR = 16 / 9;
+  const WIDE_THRESHOLD = 1.15;
   const EXPORT_AR = 9 / 16;
 
-  function applyCropGuideRect(el, photo) {
+  function applyCropGuideRect(el, photo, cardAR) {
     const { w: iw, h: ih } = mediaSize(photo.img);
     if (!iw || !ih) { el.style.display = 'none'; return; }
     const imgAR = iw / ih;
 
     let containW, containH, containLeft, containTop;
-    if (imgAR >= CARD_AR) {
-      containW = 100; containH = (CARD_AR / imgAR) * 100;
+    if (imgAR >= cardAR) {
+      containW = 100; containH = (cardAR / imgAR) * 100;
       containLeft = 0; containTop = (100 - containH) / 2;
     } else {
-      containH = 100; containW = (imgAR / CARD_AR) * 100;
+      containH = 100; containW = (imgAR / cardAR) * 100;
       containTop = 0; containLeft = (100 - containW) / 2;
     }
 
@@ -304,18 +310,21 @@
     photoGrid.innerHTML = '';
     state.photos.forEach((photo, index) => {
       const li = document.createElement('li');
-      li.className = 'photo-card';
+      const { w: photoW, h: photoH } = mediaSize(photo.img);
+      const isWide = photoW && photoH && (photoW / photoH) >= WIDE_THRESHOLD;
+      li.className = isWide ? 'photo-card photo-card-wide' : 'photo-card';
       li.dataset.id = photo.id;
       li.style.animationDelay = `${Math.min(index, 12) * 0.03}s`;
 
       const img = document.createElement('img');
       img.src = photo.url;
       img.alt = `Photo ${index + 1}`;
+      img.addEventListener('click', () => openLightbox(photo));
       li.appendChild(img);
 
       const cropGuide = document.createElement('div');
       cropGuide.className = 'photo-card-crop-guide';
-      applyCropGuideRect(cropGuide, photo);
+      applyCropGuideRect(cropGuide, photo, isWide ? WIDE_CARD_AR : CARD_AR);
       li.appendChild(cropGuide);
 
       const badge = document.createElement('span');
@@ -450,8 +459,43 @@
     }, 260);
   }
 
-  function startCardDrag(li, photo, e) {
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
+  // Une fois le drag "prêt" (souris : tout de suite : tactile : après l'appui long ci-
+  // dessus), on exige encore un petit déplacement avant d'engager visuellement le drag
+  // (position fixed, placeholder…). Sans ça, un simple clic immobile (ouvrir la
+  // visionneuse, cliquer un bouton) déclenche un cycle de drag à vide qui reconstruit
+  // toute la grille pendant le clic et casse l'événement "click" natif du navigateur.
+  function startCardDrag(li, photo, downEvent) {
+    if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
+    const pointerId = downEvent.pointerId;
+    const startX = downEvent.clientX;
+    const startY = downEvent.clientY;
+
+    const cleanupPending = () => {
+      li.removeEventListener('pointermove', onPendingMove);
+      li.removeEventListener('pointerup', onPendingUp);
+      li.removeEventListener('pointercancel', onPendingUp);
+      li.removeEventListener('lostpointercapture', onPendingUp);
+    };
+    const onPendingMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      if (Math.abs(ev.clientX - startX) <= 4 && Math.abs(ev.clientY - startY) <= 4) return;
+      cleanupPending();
+      engageCardDrag(li, photo, downEvent);
+    };
+    const onPendingUp = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      cleanupPending();
+      try { li.releasePointerCapture(pointerId); } catch { /* déjà relâché */ }
+      // Pas de déplacement significatif : on laisse le clic natif (bouton, photo…) se produire normalement.
+    };
+
+    li.addEventListener('pointermove', onPendingMove);
+    li.addEventListener('pointerup', onPendingUp);
+    li.addEventListener('pointercancel', onPendingUp);
+    li.addEventListener('lostpointercapture', onPendingUp);
+  }
+
+  function engageCardDrag(li, photo, e) {
     e.preventDefault();
     const rect = li.getBoundingClientRect();
     const placeholder = document.createElement('li');
@@ -467,7 +511,7 @@
     li.style.left = `${rect.left}px`;
     li.style.top = `${rect.top}px`;
 
-    try { li.setPointerCapture(e.pointerId); } catch { /* le doigt a pu se lever entre l'appui et l'échéance du minuteur */ }
+    try { li.setPointerCapture(e.pointerId); } catch { /* le doigt/curseur a pu se lever entre-temps */ }
     li.addEventListener('pointermove', onCardDragMove);
     li.addEventListener('pointerup', onCardDragEnd);
     li.addEventListener('pointercancel', onCardDragEnd);
@@ -1768,6 +1812,23 @@ vec4 transition(vec2 p) {
 
   recenterCancelBtn.addEventListener('click', () => {
     closeRecenterModal();
+  });
+
+  /* ===================== Lightbox (vue agrandie) ===================== */
+
+  function openLightbox(photo) {
+    lightboxImg.src = photo.url;
+    lightboxModal.classList.remove('hidden');
+  }
+
+  function closeLightbox() {
+    lightboxModal.classList.add('hidden');
+    lightboxImg.src = '';
+  }
+
+  lightboxClose.addEventListener('click', closeLightbox);
+  lightboxModal.addEventListener('click', (e) => {
+    if (e.target === lightboxModal) closeLightbox();
   });
 
   /* ===================== History ===================== */
