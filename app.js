@@ -250,6 +250,17 @@
 
   async function addPhotos(files) {
     if (!files.length) return;
+    // Un import de plusieurs grosses photos (12+ Mpx) peut prendre de longues secondes à
+    // décoder ; sans retour visuel l'écran paraît figé. On réutilise l'overlay d'export
+    // (spinner + texte + barre) plutôt que de dupliquer une UI, seulement pour les
+    // imports non triviaux pour ne pas ajouter un flash inutile sur 1-2 photos.
+    const showProgress = files.length >= 5;
+    let loadedCount = 0;
+    if (showProgress) {
+      exportOverlay.classList.remove('hidden');
+      exportStatus.textContent = `Import des photos… (0/${files.length})`;
+      exportBar.style.width = '0%';
+    }
     const loaded = await Promise.all(
       files.map(async (file) => {
         const url = URL.createObjectURL(file);
@@ -261,6 +272,12 @@
           showToast(`Impossible de charger "${file.name}"`, 'info');
           URL.revokeObjectURL(url);
           return null;
+        } finally {
+          loadedCount++;
+          if (showProgress) {
+            exportBar.style.width = `${Math.round((loadedCount / files.length) * 100)}%`;
+            exportStatus.textContent = `Import des photos… (${loadedCount}/${files.length})`;
+          }
         }
       })
     );
@@ -271,6 +288,7 @@
     renderGrid();
     renderPreviewFrame(0);
     fileInput.value = '';
+    if (showProgress) exportOverlay.classList.add('hidden');
   }
 
   /* ===================== Grid / reorder ===================== */
@@ -329,11 +347,17 @@
       li.dataset.id = photo.id;
       li.style.animationDelay = `${Math.min(index, 12) * 0.03}s`;
 
-      const img = document.createElement('img');
-      img.src = photo.url;
-      img.alt = `Photo ${index + 1}`;
-      img.addEventListener('click', () => openLightbox(photo));
-      li.appendChild(img);
+      // On réutilise photo.img (déjà décodé, potentiellement redimensionné par
+      // normalizePhotoImage — <img> ou <canvas> selon le cas) plutôt que de recréer un
+      // <img src="photo.url"> qui forcerait le navigateur à re-décoder le fichier
+      // d'origine en pleine résolution à chaque rendu de la grille : source du
+      // scintillement/noir observé le temps du décodage sur de grosses photos.
+      const thumb = photo.img;
+      thumb.className = 'photo-card-thumb';
+      if (thumb.tagName === 'IMG') thumb.alt = `Photo ${index + 1}`;
+      thumb.setAttribute('aria-label', `Photo ${index + 1}`);
+      thumb.onclick = () => openLightbox(photo);
+      li.appendChild(thumb);
 
       const cropGuide = document.createElement('div');
       cropGuide.className = 'photo-card-crop-guide';
