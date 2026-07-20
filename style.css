@@ -283,7 +283,6 @@ button { font-family: inherit; }
   background: var(--bg-elevated);
   border: 1px solid var(--panel-border);
   cursor: grab;
-  touch-action: none;
   animation: cardIn 0.4s var(--ease-spring) backwards;
   transition: transform 0.2s var(--ease-spring), box-shadow 0.2s;
 }
@@ -307,7 +306,15 @@ button { font-family: inherit; }
 
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(0.94); } to { opacity: 1; transform: none; } }
 
-.photo-card img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.photo-card img { width: 100%; height: 100%; object-fit: contain; display: block; }
+
+.photo-card-crop-guide {
+  position: absolute;
+  border: 1.5px dashed rgba(255, 255, 255, 0.85);
+  border-radius: 3px;
+  box-shadow: 0 0 0 400px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
 
 .photo-card-badge {
   position: absolute; top: 6px; left: 6px;

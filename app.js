@@ -262,6 +262,44 @@
 
   /* ===================== Grid / reorder ===================== */
 
+  // La vignette affiche la photo entière (object-fit: contain) pour que personne ne
+  // disparaisse aux extrémités ; ce cadre-guide superpose la zone 9:16 réellement
+  // gardée à l'export (calcul en pourcentages à partir des seuls ratios d'aspect,
+  // donc valable quelle que soit la taille réelle de la carte à l'écran).
+  const CARD_AR = 3 / 4;
+  const EXPORT_AR = 9 / 16;
+
+  function applyCropGuideRect(el, photo) {
+    const { w: iw, h: ih } = mediaSize(photo.img);
+    if (!iw || !ih) { el.style.display = 'none'; return; }
+    const imgAR = iw / ih;
+
+    let containW, containH, containLeft, containTop;
+    if (imgAR >= CARD_AR) {
+      containW = 100; containH = (CARD_AR / imgAR) * 100;
+      containLeft = 0; containTop = (100 - containH) / 2;
+    } else {
+      containH = 100; containW = (imgAR / CARD_AR) * 100;
+      containTop = 0; containLeft = (100 - containW) / 2;
+    }
+
+    let cropW, cropH, cropLeft, cropTop;
+    if (imgAR > EXPORT_AR) {
+      cropH = 1; cropW = EXPORT_AR / imgAR;
+      cropTop = 0;
+      cropLeft = Math.max(0, Math.min(1 - cropW, photo.focusX - cropW / 2));
+    } else {
+      cropW = 1; cropH = imgAR / EXPORT_AR;
+      cropLeft = 0;
+      cropTop = Math.max(0, Math.min(1 - cropH, photo.focusY - cropH / 2));
+    }
+
+    el.style.left = `${containLeft + cropLeft * containW}%`;
+    el.style.top = `${containTop + cropTop * containH}%`;
+    el.style.width = `${cropW * containW}%`;
+    el.style.height = `${cropH * containH}%`;
+  }
+
   function renderGrid() {
     photoGrid.innerHTML = '';
     state.photos.forEach((photo, index) => {
@@ -273,8 +311,12 @@
       const img = document.createElement('img');
       img.src = photo.url;
       img.alt = `Photo ${index + 1}`;
-      img.style.objectPosition = `${photo.focusX * 100}% ${photo.focusY * 100}%`;
       li.appendChild(img);
+
+      const cropGuide = document.createElement('div');
+      cropGuide.className = 'photo-card-crop-guide';
+      applyCropGuideRect(cropGuide, photo);
+      li.appendChild(cropGuide);
 
       const badge = document.createElement('span');
       badge.className = 'photo-card-badge';
@@ -334,10 +376,17 @@
       durationWrap.appendChild(durationInput);
       li.appendChild(durationWrap);
 
-      // Glisser-déposer (souris + tactile, via Pointer Events)
+      // Glisser-déposer (souris + tactile, via Pointer Events). Au doigt, on exige un
+      // appui bref (sans déplacement) avant d'enclencher le drag : sinon, un simple
+      // geste de défilement qui démarre sur une photo est intercepté par erreur et la
+      // carte reste "collée" en position fixed pendant que la page défile en dessous.
       li.addEventListener('pointerdown', (e) => {
         if (e.target.closest('button, input')) return;
-        startCardDrag(li, photo, e);
+        if (e.pointerType === 'mouse') {
+          startCardDrag(li, photo, e);
+        } else {
+          armCardDrag(li, photo, e);
+        }
       });
 
       photoGrid.appendChild(li);
@@ -369,6 +418,38 @@
     return clientX < rect.left + rect.width / 2;
   }
 
+  // Au tactile, on n'enclenche le drag qu'après un bref appui immobile : le pointerdown
+  // seul reste un geste ambigu (peut être le début d'un scroll de la page). Tant que le
+  // doigt ne bouge pas de plus de quelques pixels pendant ce délai, touch-action reste
+  // à sa valeur par défaut et le navigateur peut scroller normalement si l'utilisateur
+  // relâche l'appui ou déplace le doigt avant l'échéance.
+  function armCardDrag(li, photo, downEvent) {
+    const pointerId = downEvent.pointerId;
+    const startX = downEvent.clientX;
+    const startY = downEvent.clientY;
+
+    const cancelArm = () => {
+      clearTimeout(timer);
+      li.removeEventListener('pointermove', onArmMove);
+      li.removeEventListener('pointerup', cancelArm);
+      li.removeEventListener('pointercancel', cancelArm);
+    };
+    const onArmMove = (ev) => {
+      if (ev.pointerId !== pointerId) return;
+      if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) cancelArm();
+    };
+
+    li.addEventListener('pointermove', onArmMove);
+    li.addEventListener('pointerup', cancelArm);
+    li.addEventListener('pointercancel', cancelArm);
+
+    const timer = setTimeout(() => {
+      cancelArm();
+      startCardDrag(li, photo, downEvent);
+      if (navigator.vibrate) navigator.vibrate(10);
+    }, 260);
+  }
+
   function startCardDrag(li, photo, e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
@@ -380,15 +461,17 @@
     cardDrag = { photo, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, originLeft: rect.left, originTop: rect.top, placeholder };
 
     li.classList.add('dragging-active');
+    li.style.touchAction = 'none';
     li.style.width = `${rect.width}px`;
     li.style.height = `${rect.height}px`;
     li.style.left = `${rect.left}px`;
     li.style.top = `${rect.top}px`;
 
-    li.setPointerCapture(e.pointerId);
+    try { li.setPointerCapture(e.pointerId); } catch { /* le doigt a pu se lever entre l'appui et l'échéance du minuteur */ }
     li.addEventListener('pointermove', onCardDragMove);
     li.addEventListener('pointerup', onCardDragEnd);
     li.addEventListener('pointercancel', onCardDragEnd);
+    li.addEventListener('lostpointercapture', onCardDragEnd);
   }
 
   function onCardDragMove(e) {
@@ -411,10 +494,12 @@
   function onCardDragEnd(e) {
     if (!cardDrag) return;
     const li = e.currentTarget;
-    li.releasePointerCapture(cardDrag.pointerId);
+    try { li.releasePointerCapture(cardDrag.pointerId); } catch { /* déjà relâché */ }
     li.removeEventListener('pointermove', onCardDragMove);
     li.removeEventListener('pointerup', onCardDragEnd);
     li.removeEventListener('pointercancel', onCardDragEnd);
+    li.removeEventListener('lostpointercapture', onCardDragEnd);
+    li.style.touchAction = '';
 
     const domOrder = Array.from(photoGrid.children)
       .filter((el) => el !== li)
