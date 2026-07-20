@@ -14,6 +14,7 @@
     music: null,          // { file, url, el }
     watermark: '',
     quality: 'hd',
+    orientation: 'portrait',
     playing: false,
     exporting: false,
   };
@@ -33,8 +34,14 @@
   };
 
   const QUALITY_SIZES = {
-    standard: { w: 720, h: 1280, bitrate: 5_000_000 },
-    hd:       { w: 1080, h: 1920, bitrate: 12_000_000 },
+    portrait: {
+      standard: { w: 720, h: 1280, bitrate: 5_000_000 },
+      hd:       { w: 1080, h: 1920, bitrate: 12_000_000 },
+    },
+    landscape: {
+      standard: { w: 1280, h: 720, bitrate: 5_000_000 },
+      hd:       { w: 1920, h: 1080, bitrate: 12_000_000 },
+    },
   };
 
   // Les photos de téléphone (12+ Mpx) gardées en pleine résolution en mémoire pendant
@@ -75,6 +82,7 @@
   const musicClearBtn = $('musicClearBtn');
   const watermarkInput = $('watermarkInput');
   const qualitySelect = $('qualitySelect');
+  const orientationButtons = document.querySelectorAll('.segmented-btn[data-orientation]');
 
   function ctx2d(canvas) {
     const ctx = canvas.getContext('2d');
@@ -83,6 +91,7 @@
     return ctx;
   }
 
+  const previewStage = $('previewStage');
   const previewCanvas = $('previewCanvas');
   const previewCtx = ctx2d(previewCanvas);
   const previewEmpty = $('previewEmpty');
@@ -273,12 +282,16 @@
   const CARD_AR = 3 / 4;
   const WIDE_CARD_AR = 16 / 9;
   const WIDE_THRESHOLD = 1.15;
-  const EXPORT_AR = 9 / 16;
+
+  function currentExportAR() {
+    return state.orientation === 'landscape' ? 16 / 9 : 9 / 16;
+  }
 
   function applyCropGuideRect(el, photo, cardAR) {
     const { w: iw, h: ih } = mediaSize(photo.img);
     if (!iw || !ih) { el.style.display = 'none'; return; }
     const imgAR = iw / ih;
+    const EXPORT_AR = currentExportAR();
 
     let containW, containH, containLeft, containTop;
     if (imgAR >= cardAR) {
@@ -644,7 +657,7 @@
   });
 
   function resizeCanvasForQuality() {
-    const { w, h } = QUALITY_SIZES[state.quality];
+    const { w, h } = QUALITY_SIZES[state.orientation][state.quality];
     previewCanvas.width = w;
     previewCanvas.height = h;
     // Changer width/height réinitialise l'état du contexte (dont imageSmoothingQuality).
@@ -652,6 +665,23 @@
     previewCtx.imageSmoothingQuality = 'high';
   }
   resizeCanvasForQuality();
+
+  function updatePreviewStageAspect() {
+    previewStage.style.aspectRatio = state.orientation === 'landscape' ? '16 / 9' : '9 / 16';
+  }
+  updatePreviewStageAspect();
+
+  orientationButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (state.orientation === btn.dataset.orientation) return;
+      state.orientation = btn.dataset.orientation;
+      orientationButtons.forEach((b) => b.classList.toggle('active', b === btn));
+      resizeCanvasForQuality();
+      updatePreviewStageAspect();
+      renderGrid();
+      renderPreviewFrame(0);
+    });
+  });
 
   musicPickBtn.addEventListener('click', () => musicInput.click());
   musicInput.addEventListener('change', () => {
@@ -1558,7 +1588,7 @@ vec4 transition(vec2 p) {
     exportStatus.textContent = 'Préparation du montage…';
     exportBar.style.width = '0%';
 
-    const { w, h, bitrate } = QUALITY_SIZES[state.quality];
+    const { w, h, bitrate } = QUALITY_SIZES[state.orientation][state.quality];
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = w;
     exportCanvas.height = h;
@@ -1640,6 +1670,7 @@ vec4 transition(vec2 p) {
 
   function showResult(blob, url, duration) {
     resultVideo.src = url;
+    resultVideo.style.aspectRatio = state.orientation === 'landscape' ? '16 / 9' : '9 / 16';
     resultDuration.textContent = formatTime(duration);
     resultSize.textContent = formatSize(blob.size);
     editZone.classList.add('hidden');
@@ -1647,7 +1678,7 @@ vec4 transition(vec2 p) {
     launchConfetti(resultConfetti);
     showToast('Montage généré avec succès', 'celebrate');
 
-    history.unshift({ url, duration, size: blob.size, ts: Date.now() });
+    history.unshift({ url, duration, size: blob.size, ts: Date.now(), orientation: state.orientation });
     history = history.slice(0, 6);
     renderHistory();
   }
@@ -1750,6 +1781,14 @@ vec4 transition(vec2 p) {
     recenterPhoto = photo;
     recenterFocusX = photo.focusX;
     recenterFocusY = photo.focusY;
+    if (state.orientation === 'landscape') {
+      recenterCanvas.width = 640; recenterCanvas.height = 360;
+    } else {
+      recenterCanvas.width = 360; recenterCanvas.height = 640;
+    }
+    recenterCanvas.parentElement.style.aspectRatio = state.orientation === 'landscape' ? '16 / 9' : '9 / 16';
+    recenterCtx.imageSmoothingEnabled = true;
+    recenterCtx.imageSmoothingQuality = 'high';
     drawRecenterFrame();
     recenterModal.classList.remove('hidden');
   }
@@ -1839,6 +1878,7 @@ vec4 transition(vec2 p) {
     history.forEach((item) => {
       const li = document.createElement('li');
       li.className = 'history-item';
+      li.style.aspectRatio = item.orientation === 'landscape' ? '16 / 9' : '9 / 16';
       const video = document.createElement('video');
       video.src = item.url;
       video.muted = true;

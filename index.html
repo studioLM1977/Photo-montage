@@ -136,11 +136,19 @@
             <option value="hd" selected>Haute définition</option>
           </select>
         </div>
+
+        <div class="field field-row field-toggle">
+          <label>Format d'export</label>
+          <div class="segmented" role="group" aria-label="Format d'export">
+            <button type="button" class="segmented-btn active" data-orientation="portrait">Portrait 9:16</button>
+            <button type="button" class="segmented-btn" data-orientation="landscape">Paysage 16:9</button>
+          </div>
+        </div>
       </div>
 
       <div class="panel preview-panel">
         <h2>Aperçu</h2>
-        <div class="preview-stage">
+        <div id="previewStage" class="preview-stage">
           <canvas id="previewCanvas" width="720" height="1280" aria-label="Aperçu du montage"></canvas>
           <div id="previewEmpty" class="preview-empty">Ajoutez au moins 2 photos</div>
           <div class="preview-progress"><div id="previewProgressBar" class="preview-progress-bar"></div></div>
