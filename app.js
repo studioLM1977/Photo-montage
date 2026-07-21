@@ -1539,7 +1539,19 @@ vec4 transition(vec2 p) {
       const mdiaBox = mp4Box('mdia', concatBytes([patchedMdhd, hdlrBytes, minfBox]));
       const trakBox = mp4Box('trak', concatBytes([patchedTkhd, mdiaBox]));
 
-      trakBoxes.push({ bytes: trakBox, samples, movieTicks });
+      // Position exacte de la boîte stco dans trakBox, calculée à partir des tailles des
+      // boîtes qui la précèdent (plutôt que de la retrouver après coup en cherchant la
+      // signature ASCII "stco" dans les octets : stsdBytes contient de la config codec
+      // binaire arbitraire qui peut accidentellement contenir cette même séquence de 4
+      // octets, ce qui patchait alors les mauvais octets — corruption silencieuse d'autant
+      // plus probable que la piste est longue).
+      const stcoOffsetInTrak =
+        8 + patchedTkhd.length +
+        8 + patchedMdhd.length + hdlrBytes.length +
+        8 + mhdBytes.length + dinfBytes.length +
+        8 + stsdBytes.length + sttsBox.length + stscBox.length + stszBox.length;
+
+      trakBoxes.push({ bytes: trakBox, samples, movieTicks, stcoOffsetInTrak });
     }
 
     const overallMovieTicks = Math.max(0, ...trakBoxes.map((t) => t.movieTicks));
@@ -1562,17 +1574,10 @@ vec4 transition(vec2 p) {
     const headerTotalLen = ftypBytes.length + moovBox.length + 8;
 
     // Deuxième passe : patcher les stco de chaque piste avec les vrais offsets absolus.
-    const finalTrakBytes = trakBoxes.map(({ bytes, samples }) => {
+    const finalTrakBytes = trakBoxes.map(({ bytes, samples, stcoOffsetInTrak }) => {
       const trakBytes = bytes.slice();
       const trakView = new DataView(trakBytes.buffer);
-      let markerPos = -1;
-      for (let i = 0; i + 4 <= trakBytes.length; i++) {
-        if (trakBytes[i] === 0x73 && trakBytes[i + 1] === 0x74 && trakBytes[i + 2] === 0x63 && trakBytes[i + 3] === 0x6f) {
-          markerPos = i - 4; // revenir au début de la boîte (avant le tag 'stco')
-          break;
-        }
-      }
-      const entriesStart = markerPos + 4 + 4 + 4 + 4; // size+type+version_flags+entry_count
+      const entriesStart = stcoOffsetInTrak + 4 + 4 + 4 + 4; // size+type+version_flags+entry_count
       samples.forEach((s, i) => {
         const newOffset = headerTotalLen + newOffsetForSample(s);
         trakView.setUint32(entriesStart + i * 4, newOffset);
