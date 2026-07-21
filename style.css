@@ -311,7 +311,7 @@ button { font-family: inherit; }
 
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px) scale(0.94); } to { opacity: 1; transform: none; } }
 
-.photo-card img { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; }
+.photo-card-thumb { width: 100%; height: 100%; object-fit: contain; display: block; cursor: zoom-in; }
 
 /* ===== Lightbox (vue agrandie) ===== */
 .lightbox-modal {
@@ -335,9 +335,9 @@ button { font-family: inherit; }
 
 .photo-card-crop-guide {
   position: absolute;
-  border: 1.5px dashed rgba(255, 255, 255, 0.85);
+  border: 1.5px dashed rgba(255, 255, 255, 0.75);
   border-radius: 3px;
-  box-shadow: 0 0 0 400px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 400px rgba(0, 0, 0, 0.32);
   pointer-events: none;
 }
 
@@ -363,6 +363,18 @@ button { font-family: inherit; }
 }
 .photo-card-recenter:hover { background: var(--accent); }
 .photo-card-recenter:active { transform: scale(0.88); }
+
+.photo-card-handle {
+  position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
+  width: 28px; height: 20px; border-radius: var(--radius-full);
+  background: rgba(0, 0, 0, 0.55); color: white; border: none; cursor: grab;
+  font-size: 0.85rem; line-height: 1; letter-spacing: -1px;
+  display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);
+  touch-action: none; transition: background 0.2s, transform 0.15s var(--ease-spring);
+  z-index: 3;
+}
+.photo-card-handle:hover { background: var(--accent); }
+.photo-card-handle:active { cursor: grabbing; transform: translateX(-50%) scale(0.9); }
 
 .photo-card-move {
   position: absolute; top: 50%; left: 0; right: 0; transform: translateY(-50%);

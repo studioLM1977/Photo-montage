@@ -331,6 +331,11 @@
       cropTop = Math.max(0, Math.min(1 - cropH, photo.focusY - cropH / 2));
     }
 
+    // Si le recadrage ne retire presque rien (photo déjà proche du format d'export),
+    // afficher le cadre n'apporte aucune information et se lit comme un artefact visuel
+    // plutôt qu'un vrai guide — on le masque dans ce cas.
+    if (cropW > 0.94 && cropH > 0.94) { el.style.display = 'none'; return; }
+    el.style.display = '';
     el.style.left = `${containLeft + cropLeft * containW}%`;
     el.style.top = `${containTop + cropTop * containH}%`;
     el.style.width = `${cropW * containW}%`;
@@ -422,18 +427,20 @@
       durationWrap.appendChild(durationInput);
       li.appendChild(durationWrap);
 
-      // Glisser-déposer (souris + tactile, via Pointer Events). Au doigt, on exige un
-      // appui bref (sans déplacement) avant d'enclencher le drag : sinon, un simple
-      // geste de défilement qui démarre sur une photo est intercepté par erreur et la
-      // carte reste "collée" en position fixed pendant que la page défile en dessous.
-      li.addEventListener('pointerdown', (e) => {
-        if (e.target.closest('button, input')) return;
-        if (e.pointerType === 'mouse') {
-          startCardDrag(li, photo, e);
-        } else {
-          armCardDrag(li, photo, e);
-        }
+      // Glisser-déposer via une poignée dédiée (souris + tactile, Pointer Events). Un
+      // geste sur la photo elle-même ne peut jamais être un drag (seulement la
+      // lightbox), donc aucune ambiguïté avec le défilement de la page : le drag peut
+      // s'enclencher immédiatement dès l'appui sur la poignée, sans délai ni seuil.
+      const dragHandle = document.createElement('button');
+      dragHandle.type = 'button';
+      dragHandle.className = 'photo-card-handle';
+      dragHandle.setAttribute('aria-label', 'Glisser pour réordonner');
+      dragHandle.innerHTML = '⠿';
+      dragHandle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        engageCardDrag(li, photo, e);
       });
+      li.appendChild(dragHandle);
 
       photoGrid.appendChild(li);
     });
@@ -464,75 +471,11 @@
     return clientX < rect.left + rect.width / 2;
   }
 
-  // Au tactile, on n'enclenche le drag qu'après un bref appui immobile : le pointerdown
-  // seul reste un geste ambigu (peut être le début d'un scroll de la page). Tant que le
-  // doigt ne bouge pas de plus de quelques pixels pendant ce délai, touch-action reste
-  // à sa valeur par défaut et le navigateur peut scroller normalement si l'utilisateur
-  // relâche l'appui ou déplace le doigt avant l'échéance.
-  function armCardDrag(li, photo, downEvent) {
-    const pointerId = downEvent.pointerId;
-    const startX = downEvent.clientX;
-    const startY = downEvent.clientY;
-
-    const cancelArm = () => {
-      clearTimeout(timer);
-      li.removeEventListener('pointermove', onArmMove);
-      li.removeEventListener('pointerup', cancelArm);
-      li.removeEventListener('pointercancel', cancelArm);
-    };
-    const onArmMove = (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      if (Math.abs(ev.clientX - startX) > 8 || Math.abs(ev.clientY - startY) > 8) cancelArm();
-    };
-
-    li.addEventListener('pointermove', onArmMove);
-    li.addEventListener('pointerup', cancelArm);
-    li.addEventListener('pointercancel', cancelArm);
-
-    const timer = setTimeout(() => {
-      cancelArm();
-      startCardDrag(li, photo, downEvent);
-      if (navigator.vibrate) navigator.vibrate(10);
-    }, 260);
-  }
-
-  // Une fois le drag "prêt" (souris : tout de suite : tactile : après l'appui long ci-
-  // dessus), on exige encore un petit déplacement avant d'engager visuellement le drag
-  // (position fixed, placeholder…). Sans ça, un simple clic immobile (ouvrir la
-  // visionneuse, cliquer un bouton) déclenche un cycle de drag à vide qui reconstruit
-  // toute la grille pendant le clic et casse l'événement "click" natif du navigateur.
-  function startCardDrag(li, photo, downEvent) {
-    if (downEvent.pointerType === 'mouse' && downEvent.button !== 0) return;
-    const pointerId = downEvent.pointerId;
-    const startX = downEvent.clientX;
-    const startY = downEvent.clientY;
-
-    const cleanupPending = () => {
-      li.removeEventListener('pointermove', onPendingMove);
-      li.removeEventListener('pointerup', onPendingUp);
-      li.removeEventListener('pointercancel', onPendingUp);
-      li.removeEventListener('lostpointercapture', onPendingUp);
-    };
-    const onPendingMove = (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      if (Math.abs(ev.clientX - startX) <= 4 && Math.abs(ev.clientY - startY) <= 4) return;
-      cleanupPending();
-      engageCardDrag(li, photo, downEvent);
-    };
-    const onPendingUp = (ev) => {
-      if (ev.pointerId !== pointerId) return;
-      cleanupPending();
-      try { li.releasePointerCapture(pointerId); } catch { /* déjà relâché */ }
-      // Pas de déplacement significatif : on laisse le clic natif (bouton, photo…) se produire normalement.
-    };
-
-    li.addEventListener('pointermove', onPendingMove);
-    li.addEventListener('pointerup', onPendingUp);
-    li.addEventListener('pointercancel', onPendingUp);
-    li.addEventListener('lostpointercapture', onPendingUp);
-  }
-
+  // Démarrage du drag depuis la poignée dédiée : aucune ambiguïté possible avec un
+  // scroll de page ou un tap sur la photo (lightbox), donc pas besoin de délai ni de
+  // seuil de mouvement — on engage tout de suite, souris comme tactile.
   function engageCardDrag(li, photo, e) {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     e.preventDefault();
     const rect = li.getBoundingClientRect();
     const placeholder = document.createElement('li');
